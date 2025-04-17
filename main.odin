@@ -66,8 +66,23 @@ Cpu :: struct {
 	},
 }
 
+Operand_Type :: enum {
+	None,
+	cc,
+	vec,
+	r8,
+	r16,
+	a16,
+	u3,
+	a8,
+	e8,
+	n16,
+	n8,
+}
+
 Operand :: struct {
 	name:      string,
+	type:      Operand_Type,
 	immediate: bool,
 	bytes:     Maybe(u8),
 	Modifier:  enum {
@@ -76,46 +91,6 @@ Operand :: struct {
 		Increment,
 	},
 }
-
-Operand_Names :: enum {
-	VEC_00,
-	VEC_08,
-	VEC_10,
-	VEC_18,
-	VEC_20,
-	VEC_28,
-	VEC_30,
-	VEC_38,
-	// 0 ,
-	// 1 ,
-	// 2 ,
-	// 3 ,
-	// 4 ,
-	// 5 ,
-	// 6 ,
-	// 7 ,
-	// A ,
-	AF,
-	B,
-	BC,
-	C,
-	D,
-	DE,
-	E,
-	H,
-	HL,
-	L,
-	NC,
-	NZ,
-	SP,
-	Z,
-	a16,
-	a8,
-	e8,
-	n16,
-	n8,
-}
-
 
 Instruction :: struct {
 	mnemonic:  string,
@@ -127,6 +102,48 @@ Instruction :: struct {
 
 Instruction_Error :: enum {
 	None,
+}
+
+Operand_Map :: []struct {
+	name: string,
+	type: Operand_Type,
+} {
+	{"$00", .vec},
+	{"$08", .vec},
+	{"$10", .vec},
+	{"$18", .vec},
+	{"$20", .vec},
+	{"$28", .vec},
+	{"$30", .vec},
+	{"$38", .vec},
+	{"0", .u3},
+	{"1", .u3},
+	{"2", .u3},
+	{"3", .u3},
+	{"4", .u3},
+	{"5", .u3},
+	{"6", .u3},
+	{"7", .u3},
+	{"A", .r8},
+	{"B", .r8},
+	{"C", nil},
+	{"D", .r8},
+	{"E", .r8},
+	{"H", .r8},
+	{"L", .r8},
+	{"Z", .cc},
+	{"AF", .r16},
+	{"BC", .r16},
+	{"DE", .r16},
+	{"HL", .r16},
+	{"SP", .r16},
+	{"NC", .cc},
+	{"NZ", .cc},
+	{"a16", .a16},
+	{"a8", .a8},
+	{"e8", .e8},
+	{"n16", .n16},
+	{"n8", .n8},
 }
 
 parse_json :: proc(root: json.Object) -> (instructions: [dynamic]Instruction, err: json.Error) {
