@@ -102,7 +102,6 @@ main :: proc() {
 
 	assert(slice.equal(rom[:Memory_Map.Rom], cpu.memory[:Memory_Map.Rom]))
 
-
 	for {
 		opcode := cpu.memory[cpu.registers.PC]
 		instruction := unprefixed_instructions[opcode]
@@ -218,7 +217,55 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
+get_reg16 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u16) {
+	switch name^ {
+	case "AF":
+		return &cpu.registers.AF.full
+	case "BC":
+		return &cpu.registers.BC.full
+	case "DE":
+		return &cpu.registers.DE.full
+	case "HL":
+		return &cpu.registers.HL.full
+	case:
+		assert(false, "reg16 not defind")
+		return
+	}
+}
+
+get_reg8 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u8) {
+	switch name^ {
+	case "A":
+		return &cpu.registers.AF.single.upper
+	case "F":
+		return &cpu.registers.AF.single.lower
+	case "B":
+		return &cpu.registers.BC.single.upper
+	case "C":
+		return &cpu.registers.BC.single.lower
+	case "D":
+		return &cpu.registers.DE.single.upper
+	case "E":
+		return &cpu.registers.DE.single.lower
+	case "H":
+		return &cpu.registers.HL.single.upper
+	case "L":
+		return &cpu.registers.HL.single.lower
+	case:
+		assert(true, "reg8 not defind")
+		return
+	}
+}
+
+is_reg8 :: proc(name: ^string) -> bool {
+	return slice.contains(Register8_Names, name^)
+}
+
+is_reg16 :: proc(name: ^string) -> bool {
+	return slice.contains(Register16_Names, name^)
+}
 adc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+
 }
 add :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
@@ -244,8 +291,6 @@ ei :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 halt :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
-illegal :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
 inc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -253,7 +298,23 @@ jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	assert(len(instruction.operands) == 2, "Worg amount of operands")
+	first_operand := instruction.operands[0]
+	second_operand := instruction.operands[1]
+
+	if is_reg8(&first_operand.name) && is_reg8(&second_operand.name) {
+		get_reg8(cpu, &first_operand.name)^ = get_reg8(cpu, &second_operand.name)^
+	} else if is_reg8(&first_operand.name) && second_operand.name == "n8" {
+		get_reg8(cpu, &first_operand.name)^ = cpu.memory[cpu.registers.PC + 1]
+	} else if is_reg8(&first_operand.name) && second_operand.name == "HL" {
+		get_reg8(cpu, &first_operand.name)^ = cpu.memory[cpu.registers.HL.full]
+	} else if first_operand.name == "HL" && is_reg8(&second_operand.name) {
+		cpu.memory[cpu.registers.HL.full] = get_reg8(cpu, &second_operand.name)^
+	} else if first_operand.name == "HL" && second_operand.name == "n8" {
+		cpu.memory[cpu.registers.HL.full] = cpu.memory[cpu.registers.PC + 1]
+	}
 }
+
 ldh :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 nop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -261,8 +322,6 @@ nop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 or :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 pop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
-prefix :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 push :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
@@ -492,49 +551,16 @@ mnemonic_map: []Mnemonic_Map_Type : {
 	{"XOR", .XOR},
 }
 
-Operand_Map_Type :: []struct {
-	name: string,
-	type: Operand_Type,
-}
-
-Operand_Map :: Operand_Map_Type {
-	{"$00", .vec},
-	{"$08", .vec},
-	{"$10", .vec},
-	{"$18", .vec},
-	{"$20", .vec},
-	{"$28", .vec},
-	{"$30", .vec},
-	{"$38", .vec},
-	{"0", .u3},
-	{"1", .u3},
-	{"2", .u3},
-	{"3", .u3},
-	{"4", .u3},
-	{"5", .u3},
-	{"6", .u3},
-	{"7", .u3},
-	{"A", .r8},
-	{"B", .r8},
-	{"C", nil},
-	{"D", .r8},
-	{"E", .r8},
-	{"H", .r8},
-	{"L", .r8},
-	{"Z", .cc},
-	{"AF", .r16},
-	{"BC", .r16},
-	{"DE", .r16},
-	{"HL", .r16},
-	{"SP", .r16},
-	{"NC", .cc},
-	{"NZ", .cc},
-	{"a16", .a16},
-	{"a8", .a8},
-	{"e8", .e8},
-	{"n16", .n16},
-	{"n8", .n8},
-}
+Register16_Names :: []string{"AF", "BC", "DE", "HL", "SP"}
+Register8_Names :: []string{"A", "B", "C", "D", "E", "H", "L"}
+Vec_Names :: []string{"$00", "$08", "$10", "$18", "$20", "$28", "$30", "$38"}
+Index_Names :: []string{"0", "1", "2", "3", "4", "5", "6", "7"}
+Condion_Names :: []string{"Z", "C", "NC", "NZ"}
+N16_Name :: "n16"
+N8_Name :: "n8"
+A8_Name :: "a8"
+LE16_Name :: "a16"
+E8_Name :: "e8"
 
 get_mnemonic_type :: proc(name: string) -> Mnemonic {
 	for val in mnemonic_map {
