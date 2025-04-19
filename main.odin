@@ -113,25 +113,202 @@ main :: proc() {
 			instruction = prefixed_instructions[opcode]
 		}
 
+
 		execute_instruction(&cpu, instruction)
 	}
 }
 
 execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	switch instruction.mnemonic {
+	case .ADC:
+		adc(cpu, instruction)
+	case .ADD:
+		add(cpu, instruction)
+	case .AND:
+		and(cpu, instruction)
+	case .BIT:
+		bit(cpu, instruction)
+	case .CALL:
+		call(cpu, instruction)
+	case .CCF:
+		ccf(cpu, instruction)
+	case .CP:
+		cp(cpu, instruction)
+	case .CPL:
+		cpl(cpu, instruction)
+	case .DAA:
+		daa(cpu, instruction)
+	case .DEC:
+		dec(cpu, instruction)
+	case .DI:
+		di(cpu, instruction)
+	case .EI:
+		ei(cpu, instruction)
+	case .HALT:
+		halt(cpu, instruction)
+	case .ILLEGAL:
+		#assert(true, "ilLegal instruction")
+	case .INC:
+		inc(cpu, instruction)
+	case .JP:
+		jp(cpu, instruction)
+	case .JR:
+		jr(cpu, instruction)
 	case .LD:
-		load()
+		ld(cpu, instruction)
 	case .LDH:
-	case .ILLEGAL, .PREFIX:
-		#assert(true, "this shoud nerver happen")
+		ldh(cpu, instruction)
+	case .NOP:
+		nop(cpu, instruction)
+	case .OR:
+		or(cpu, instruction)
+	case .POP:
+		pop(cpu, instruction)
+	case .PREFIX:
+		#assert(true, "prefix instruction")
+	case .PUSH:
+		push(cpu, instruction)
+	case .RES:
+		res(cpu, instruction)
+	case .RET:
+		ret(cpu, instruction)
+	case .RETI:
+		reti(cpu, instruction)
+	case .RL:
+		rl(cpu, instruction)
+	case .RLA:
+		rla(cpu, instruction)
+	case .RLC:
+		rlc(cpu, instruction)
+	case .RLCA:
+		rlca(cpu, instruction)
+	case .RR:
+		rr(cpu, instruction)
+	case .RRA:
+		rra(cpu, instruction)
+	case .RRC:
+		rrc(cpu, instruction)
+	case .RRCA:
+		rrca(cpu, instruction)
+	case .RST:
+		rst(cpu, instruction)
+	case .SBC:
+		sbc(cpu, instruction)
+	case .SCF:
+		scf(cpu, instruction)
+	case .SET:
+		set(cpu, instruction)
+	case .SLA:
+		sla(cpu, instruction)
+	case .SRA:
+		sra(cpu, instruction)
+	case .SRL:
+		srl(cpu, instruction)
+	case .STOP:
+		stop(cpu, instruction)
+	case .SUB:
+		sub(cpu, instruction)
+	case .SWAP:
+		swap(cpu, instruction)
+	case .XOR:
+		xor(cpu, instruction)
 	case:
 		log.error("Not implemented yet")
 	}
 
 }
 
-
+adc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+add :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+and :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+bit :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+call :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+ccf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+cp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+cpl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+daa :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+dec :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+di :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+ei :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+halt :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+illegal :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+inc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
 ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+ldh :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+nop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+or :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+pop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+prefix :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+push :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+res :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+ret :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+reti :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rlc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rlca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rrc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rrca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+rst :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+sbc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+scf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+set :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+sla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+sra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+srl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+stop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+sub :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+swap :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+}
+xor :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 Instruction_Flags :: enum {
