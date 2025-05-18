@@ -1,6 +1,8 @@
 package main
 
 import "base:intrinsics"
+import "base:runtime"
+import "core:c/libc"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -8,11 +10,14 @@ import "core:math/bits"
 import "core:os"
 import "core:slice"
 import "core:strconv"
+import "core:strings"
+
+import "vendor:raylib"
 
 Address :: u16
 Word :: u8
 
-Memory_Map :: enum u16 {
+Memory_Map_End :: enum u16 {
 	Rom          = 0x3FFF,
 	Switch_Rom   = 0x7FFF,
 	Vram         = 0x9FFF,
@@ -24,6 +29,68 @@ Memory_Map :: enum u16 {
 	Io           = 0xFF7F,
 	Hram         = 0xFFFE,
 	Interupt     = 0xFFFF,
+}
+
+Hardware_Registers :: enum u8 {
+	JOYP     = 0x00,
+	SB       = 0x01,
+	SC       = 0x02,
+	DIV      = 0x04,
+	TIMA     = 0x05,
+	TMA      = 0x06,
+	TAC      = 0x07,
+	IF       = 0x0F,
+	NR10     = 0x10,
+	NR11     = 0x11,
+	NR12     = 0x12,
+	NR13     = 0x13,
+	NR14     = 0x14,
+	NR21     = 0x16,
+	NR22     = 0x17,
+	NR23     = 0x18,
+	NR24     = 0x19,
+	NR30     = 0x1a,
+	NR31     = 0x1b,
+	NR32     = 0x1c,
+	NR33     = 0x1d,
+	NR34     = 0x1e,
+	NR41     = 0x20,
+	NR42     = 0x21,
+	NR43     = 0x22,
+	NR44     = 0x23,
+	NR50     = 0x24,
+	NR51     = 0x25,
+	NR52     = 0x26,
+	Wave_Ram = 0x30,
+	LCDC     = 0x40,
+	STAT     = 0x41,
+	SCY      = 0x42,
+	SCX      = 0x43,
+	LY       = 0x44,
+	LYC      = 0x45,
+	DMA      = 0x46,
+	BGP      = 0x47,
+	OBP0     = 0x48,
+	OBP1     = 0x49,
+	WY       = 0x4a,
+	WX       = 0x4b,
+	KEY1     = 0x4D,
+	VBK      = 0x4F,
+	HDMA1    = 0x51,
+	HDMA2    = 0x52,
+	HDMA3    = 0x53,
+	HDMA4    = 0x54,
+	HDMA5    = 0x55,
+	RP       = 0x56,
+	BCPS     = 0x68,
+	BCPD     = 0x69,
+	OCPS     = 0x6a,
+	OCPD     = 0x6b,
+	OPRI     = 0x6c,
+	SVBK     = 0x70,
+	PCM12    = 0x76,
+	PCM34    = 0x77,
+	IE       = 0xFF,
 }
 
 Instruction_Flags :: enum {
@@ -44,8 +111,10 @@ Register :: struct #raw_union {
 }
 
 Cpu :: struct {
-	memory:    [0xFFFF]Word,
-	registers: struct {
+	memory:          [0xFFFF]Word,
+	interrupt:       bool,
+	pre_instruction: Mnemonic,
+	registers:       struct {
 		AF: struct #raw_union {
 			full:   u16,
 			single: struct {
@@ -59,6 +128,10 @@ Cpu :: struct {
 		PC: Address,
 		SP: Address,
 	},
+}
+
+Gameboy :: struct {
+	cpu: Cpu,
 }
 
 Flags :: enum {
@@ -232,78 +305,114 @@ Vec_Names :: []string{"$00", "$08", "$10", "$18", "$20", "$28", "$30", "$38"}
 Index_Names :: []string{"0", "1", "2", "3", "4", "5", "6", "7"}
 Condion_Names :: []string{"Z", "C", "NC", "NZ"}
 
+instruction_trace := [dynamic]^Instruction{}
+c_context: runtime.Context
+cpu: Cpu
+
+opcode_json :: #load("./opcodes.json")
+
+as_asm :: proc(instruction: ^Instruction) -> string {
+	out: strings.Builder
+	mnemonic, ok := fmt.enum_value_to_string(instruction.mnemonic)
+	if !ok {
+		panic("Instruction mnemonic err")
+	}
+
+	strings.write_string(&out, mnemonic)
+	for operand in instruction.operands {
+		strings.write_string(&out, " ")
+		strings.write_string(&out, operand.name)
+	}
+
+	return strings.to_string(out)
+}
+
+sig_handler :: proc "c" (_: libc.int) {
+	context = c_context
+	simulated_pc: u16 = 0x0100
+	for instruction in instruction_trace {
+		log.fatalf("At %04X: %s", simulated_pc, as_asm(instruction))
+		log.fatalf("Bytes: %X", cpu.memory[simulated_pc:][:instruction.bytes])
+		simulated_pc += u16(instruction.bytes)
+	}
+
+	free_all()
+	runtime.panic("main.panic")
+}
+
 main :: proc() {
 	context.logger = log.create_console_logger(.Debug)
+	libc.signal(libc.SIGSEGV, sig_handler)
+	libc.signal(libc.SIGILL, sig_handler)
 
-	data, ok := os.read_entire_file_from_filename("./opcodes.json")
-	if !ok {
-		log.error("Failed to load json file")
+	c_context = context
+
+	if len(os.args) != 2 {
+		log.errorf("Wrong number of args (%d)", len(os.args))
+		log.error(os.args)
 		return
 	}
 
-	defer delete(data)
-	j_data, err := json.parse(data)
+	rom_path := os.args[1]
+	rom, rom_ok := os.read_entire_file_from_filename(rom_path)
+	if !rom_ok {
+		log.error("Can not read file")
+		return
+	}
+
+	json_data, err := json.parse(opcode_json)
 	if err != .None {
 		log.error("Failed to parse the json file.")
 		log.error(err)
 		return
 	}
-	defer json.destroy_value(j_data)
+	defer json.destroy_value(json_data)
 
 	instruction := new(Instruction)
-	root := j_data.(json.Object)
+	root := json_data.(json.Object)
 
-	unprefixed_instructions, unprefixed_err := generate_instruction(
-		root["unprefixed"].(json.Object),
-	)
-	if unprefixed_err != .None {
-		log.error(err)
-		return
-	}
+	unprefixed_instructions := generate_instruction(root["unprefixed"].(json.Object))
+	defer destroy_instructions(unprefixed_instructions)
 
-	prefixed_instructions, prefixed_err := generate_instruction(root["cbprefixed"].(json.Object))
-	if prefixed_err != .None {
-		log.error(err)
-		return
-	}
-
-	if len(os.args) != 2 {
-		log.error(os.args)
-		log.error("Not enough args")
-		return
-	}
-
-	rom_path := os.args[1]
-	rom, ok2 := os.read_entire_file_from_filename(rom_path)
-	if !ok2 {
-		log.error("Can not read file")
-		log.error(err)
-		return
-	}
+	prefixed_instructions := generate_instruction(root["cbprefixed"].(json.Object))
+	defer destroy_instructions(prefixed_instructions)
 
 	rom_size := len(rom)
 
-	cpu := Cpu{}
+	cpu.registers.PC = 0x0100
+	cpu.registers.SP = 0xfffe
 
-	for i in 0 ..< u16(Memory_Map.Rom) {
+	for i in 0 ..< u16(Memory_Map_End.Rom) {
 		cpu.memory[i] = rom[i]
 	}
 
-	assert(slice.equal(rom[:Memory_Map.Rom], cpu.memory[:Memory_Map.Rom]))
+	assert(slice.equal(rom[:Memory_Map_End.Rom], cpu.memory[:Memory_Map_End.Rom]))
 
-	for false {
+	raylib.InitWindow(160, 144, "oboy")
+	raylib.SetTargetFPS(30)
+
+	for !raylib.WindowShouldClose() {
+
+		// for false {
 		opcode := cpu.memory[cpu.registers.PC]
 		instruction := unprefixed_instructions[opcode]
 
 		if instruction.mnemonic == .PREFIX {
-			cpu.registers.PC += 1
 			opcode = cpu.memory[cpu.registers.PC]
 			instruction = prefixed_instructions[opcode]
 		}
 
+		append(&instruction_trace, instruction)
 
 		execute_instruction(&cpu, instruction)
+
+		raylib.BeginDrawing()
+		raylib.ClearBackground(raylib.WHITE)
+		raylib.EndDrawing()
 	}
+
+	raylib.CloseWindow()
+	free_all()
 }
 
 execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -328,14 +437,10 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		daa(cpu, instruction)
 	case .DEC:
 		dec(cpu, instruction)
-	case .DI:
-		di(cpu, instruction)
-	case .EI:
-		ei(cpu, instruction)
 	case .HALT:
 		halt(cpu, instruction)
 	case .ILLEGAL:
-		#assert(true, "ilLegal instruction")
+		#assert(true, "ilLegal instruction gb")
 	case .INC:
 		inc(cpu, instruction)
 	case .JP:
@@ -346,8 +451,6 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		ld(cpu, instruction)
 	case .LDH:
 		ldh(cpu, instruction)
-	case .NOP:
-		nop(cpu, instruction)
 	case .OR:
 		or(cpu, instruction)
 	case .POP:
@@ -361,7 +464,8 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	case .RET:
 		ret(cpu, instruction)
 	case .RETI:
-		reti(cpu, instruction)
+		ret(cpu, instruction)
+		cpu.interrupt = true
 	case .RL:
 		rl(cpu, instruction)
 	case .RLA:
@@ -400,10 +504,21 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		swap(cpu, instruction)
 	case .XOR:
 		xor(cpu, instruction)
+	case .NOP:
+	case .DI, .EI:
 	case:
 		log.error("Not implemented yet")
 	}
 
+	#partial switch cpu.pre_instruction {
+	case .DI:
+		cpu.interrupt = false
+	case .EI:
+		cpu.interrupt = true
+	}
+
+	cpu.pre_instruction = instruction.mnemonic
+	cpu.registers.PC += u16(instruction.bytes)
 }
 
 get_mnemonic_type :: proc(name: string) -> Mnemonic {
@@ -417,12 +532,7 @@ get_mnemonic_type :: proc(name: string) -> Mnemonic {
 	return nil
 }
 
-generate_instruction :: proc(
-	root: json.Object,
-) -> (
-	instructions: map[u8]^Instruction,
-	err: json.Error,
-) {
+generate_instruction :: proc(root: json.Object) -> (instructions: map[u8]^Instruction) {
 	instructions = make(map[u8]^Instruction, len(root))
 	i := 0
 	for key in root {
@@ -432,7 +542,6 @@ generate_instruction :: proc(
 		instruction.bytes = u8(val["bytes"].(json.Float))
 		instruction.mnemonic = get_mnemonic_type(val["mnemonic"].(json.String))
 
-
 		json_operands := val["operands"].(json.Array)
 		instruction.operands = make([dynamic]Operand, len(json_operands))
 		operands := &instruction.operands
@@ -441,6 +550,10 @@ generate_instruction :: proc(
 
 			bytes := operand["bytes"]
 			operands[i].bytes = nil if bytes == nil else u8(bytes.(json.Float))
+			immediate := operand["immediate"]
+			operands[i].immediate = false if immediate == nil else immediate.(json.Boolean)
+
+			operands[i].name = operand["name"].(json.String)
 
 			operands[i].Modifier = .None
 
@@ -454,14 +567,21 @@ generate_instruction :: proc(
 
 		opcode, ok := strconv.parse_u64_maybe_prefixed(key)
 		if !ok {
-			log.error("key is not a opcode")
+			log.panic("key is not a opcode")
 		}
 
 		instructions[u8(opcode)] = instruction
 		i += 1
 	}
 
+	return instructions
+}
 
-	return instructions, .None
+destroy_instructions :: proc(instructions: map[u8]^Instruction) {
+	for _, instruction in instructions {
+		delete(instruction.operands)
+		free(instruction)
+	}
+	delete(instructions)
 }
 

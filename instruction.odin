@@ -313,6 +313,24 @@ bit :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 call :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	operand_count := len(instruction.operands)
+	assert(operand_count <= 2, "Wrong amount of operands")
+	first_operand := instruction.operands[0]
+
+	if operand_count == 2 &&
+	   !check_condition(&cpu.registers.AF.single.lower, get_condition(&first_operand.name)) {
+		return
+	}
+
+	n := get_n16(cpu)
+	msb, lsb := split_u16(n)
+
+	cpu.registers.SP -= 1
+	cpu.memory[cpu.registers.SP] = msb
+	cpu.registers.SP -= 1
+	cpu.memory[cpu.registers.SP] = lsb
+
+	cpu.registers.PC = n
 }
 
 ccf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -413,13 +431,8 @@ dec_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.AF.single.lower = flags
 }
 
-di :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
-
-ei :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
-
 halt :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	//TODO: maybe implement HALT
 }
 
 
@@ -428,8 +441,10 @@ inc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	operand := instruction.operands[0]
 
 	if is_reg16(&operand.name) {
+		log.info("inc 16")
 		get_reg16(cpu, &operand.name)^ += 1
 	} else {
+		log.info("inc 8")
 		inc_8(cpu, instruction)
 	}
 
@@ -449,6 +464,8 @@ inc_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	res := u8(full_res)
 	value^ = res
 
+	log.info("flags")
+
 	flags := &cpu.registers.AF.single.lower
 	flags^ -= {.N}
 	flags^ = flags^ + {.Z} if res == 0 else flags^ - {.Z}
@@ -456,80 +473,44 @@ inc_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) <= 2, "Wrong amount of operands")
+	operand_count := len(instruction.operands)
+	assert(operand_count <= 2, "Wrong amount of operands")
 
-	if len(instruction.operands) == 2 {
-		jump_condional(cpu, instruction)
-	} else {
-
-		jump(cpu, instruction)
-	}
-
-}
-
-jump :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
+	flags := &cpu.registers.AF.single.lower
+
 	value: u16
 
-	if first_operand.name == "a16" {
+	if operand_count == 2 && !check_condition(flags, get_condition(&first_operand.name)) {
+		return
+	}
+
+	switch first_operand.name {
+	case "a16":
 		value = get_n16(cpu)
-	} else if first_operand.name == "HL" {
+	case "HL":
 		value = cpu.registers.HL.full
+	case:
+		value = get_n16(cpu)
 	}
 
 	cpu.registers.PC = value
-}
-
-
-jump_condional :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 2, "Wrong amount of operands")
-	first_operand := instruction.operands[0]
-
-	value := get_n16(cpu)
-	flags := &cpu.registers.AF.single.lower
-
-	if check_condition(flags, get_condition(&first_operand.name)) {
-		cpu.registers.PC = value
-	}
-}
-
-jump_relative :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 1, "Wrong amount of operands")
-	first_operand := instruction.operands[0]
-	value: u16
-
-	if first_operand.name == "e8" {
-		value = get_n16(cpu)
-	} else if first_operand.name == "HL" {
-		value = cpu.registers.HL.full
-	}
-
-	cpu.registers.PC = u16(i16(cpu.registers.PC) - transmute(i16)value)
-}
-
-
-jump_relative_condional :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 2, "Wrong amount of operands")
-	first_operand := instruction.operands[0]
-
-	value := get_n16(cpu)
-	flags := &cpu.registers.AF.single.lower
-
-	if check_condition(flags, get_condition(&first_operand.name)) {
-		cpu.registers.PC = value
-	}
+	log.infof("jump to %X", value)
 }
 
 jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) <= 2, "Wrong amount of operands")
+	operand_count := len(instruction.operands)
+	assert(operand_count <= 2, "Wrong amount of operands")
 
-	if len(instruction.operands) == 2 {
-		jump_relative_condional(cpu, instruction)
-	} else {
-		jump_relative(cpu, instruction)
+	first_operand := instruction.operands[0]
+	flags := &cpu.registers.AF.single.lower
+	value := get_n16(cpu)
+
+	if operand_count == 2 && !check_condition(flags, get_condition(&first_operand.name)) {
+		return
 	}
 
+	cpu.registers.PC = u16(i16(cpu.registers.PC) - transmute(i16)value)
 }
 
 ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -652,8 +633,6 @@ ldh :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	}
 }
-nop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
 
 or :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
@@ -728,9 +707,28 @@ res :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 ret :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	operand_count := len(instruction.operands)
+	assert(operand_count <= 1, "Wrong amount of operands")
+
+	if operand_count == 1 &&
+	   !check_condition(
+			   &cpu.registers.AF.single.lower,
+			   get_condition(&instruction.operands[0].name),
+		   ) {
+		return
+	}
+
+	lsb := cpu.memory[cpu.registers.SP]
+	cpu.registers.SP += 1
+	msb := cpu.memory[cpu.registers.SP]
+	cpu.registers.SP += 1
+
+	n := (u16(msb) << 8) + u16(lsb)
+
+	cpu.registers.PC = n
 }
-reti :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-}
+
+
 rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
@@ -750,7 +748,6 @@ rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	if target^ == 0 {
 		flags^ += {.Z}
 	}
-
 
 	flags^ -= {.N, .H}
 }
@@ -822,9 +819,9 @@ rr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		flags^ += {.Z}
 	}
 
-
 	flags^ -= {.N, .H}
 }
+
 rra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
@@ -871,6 +868,7 @@ rrca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 rst :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	//TODO: RST
 }
 
 sbc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -1021,6 +1019,7 @@ srl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 stop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+	//TODO: maybe implement STOP
 }
 
 sub :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -1046,7 +1045,6 @@ sub :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N}
 	flags^ = flags^ + {.H} if is_half_carried_sub(a^, value) else flags^ - {.H}
 	flags^ = flags^ + {.C} if is_overflown else flags^ - {.C}
-
 }
 
 swap :: proc(cpu: ^Cpu, instruction: ^Instruction) {
