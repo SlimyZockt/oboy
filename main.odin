@@ -518,6 +518,12 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	}
 
 	cpu.pre_instruction = instruction.mnemonic
+
+	#partial switch instruction.mnemonic {
+	case .CALL, .JP, .JR, .RET, .RETI, .RST:
+		return
+	}
+
 	cpu.registers.PC += u16(instruction.bytes)
 }
 

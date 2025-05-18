@@ -84,3 +84,15 @@ test_u16_to_i8 :: proc(t: ^testing.T) {
 	log.infof("%b", u)
 	log.info(u16(i - i16(transmute(i8)u)))
 }
+
+@(test)
+test_get16 :: proc(t: ^testing.T) {
+	cpu: Cpu
+	cpu.memory[0] = 0xFF
+	cpu.memory[1] = 0x0F
+
+	out := get_n16(&cpu, 0)
+	log.infof("%X", out)
+	testing.expect(t, 0x0FFF == out)
+}
+

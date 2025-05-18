@@ -57,9 +57,9 @@ is_reg16 :: proc(name: ^string) -> bool {
 	return slice.contains(Register16_Names, name^)
 }
 
-get_n16 :: proc(cpu: ^Cpu, offset: u16 = 0) -> u16 {
-	low := cpu.memory[cpu.registers.PC + offset + 1]
-	high := cpu.memory[cpu.registers.PC + offset + 2]
+get_n16 :: proc(cpu: ^Cpu, offset: u16 = 1) -> u16 {
+	low := cpu.memory[cpu.registers.PC + offset]
+	high := cpu.memory[cpu.registers.PC + offset + 1]
 
 	return (u16(high) << 8) + u16(low)
 }
@@ -495,7 +495,7 @@ jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	}
 
 	cpu.registers.PC = value
-	log.infof("jump to %X", value)
+	log.infof("jump to %X", cpu.registers.PC)
 }
 
 jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
