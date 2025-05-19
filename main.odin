@@ -305,7 +305,16 @@ Vec_Names :: []string{"$00", "$08", "$10", "$18", "$20", "$28", "$30", "$38"}
 Index_Names :: []string{"0", "1", "2", "3", "4", "5", "6", "7"}
 Condion_Names :: []string{"Z", "C", "NC", "NZ"}
 
-instruction_trace := [dynamic]^Instruction{}
+Trace_Data :: struct {
+	instruction: ^Instruction,
+	pc:          Address,
+}
+
+Trace_Log :: struct {
+	data: [dynamic]^Trace_Data,
+}
+
+trace_log: Trace_Log
 c_context: runtime.Context
 cpu: Cpu
 
@@ -329,11 +338,9 @@ as_asm :: proc(instruction: ^Instruction) -> string {
 
 sig_handler :: proc "c" (_: libc.int) {
 	context = c_context
-	simulated_pc: u16 = 0x0100
-	for instruction in instruction_trace {
-		log.fatalf("At %04X: %s", simulated_pc, as_asm(instruction))
-		log.fatalf("Bytes: %X", cpu.memory[simulated_pc:][:instruction.bytes])
-		simulated_pc += u16(instruction.bytes)
+	for data in trace_log.data {
+		log.fatalf("At %04X: %s", data.pc, as_asm(data.instruction))
+		log.fatalf("Bytes: %X", cpu.memory[data.pc:][:data.instruction.bytes])
 	}
 
 	free_all()
@@ -402,7 +409,9 @@ main :: proc() {
 			instruction = prefixed_instructions[opcode]
 		}
 
-		append(&instruction_trace, instruction)
+		trace_data := new(Trace_Data)
+		trace_data^ = {instruction, cpu.registers.PC}
+		append(&trace_log.data, trace_data)
 
 		execute_instruction(&cpu, instruction)
 
@@ -590,4 +599,3 @@ destroy_instructions :: proc(instructions: map[u8]^Instruction) {
 	}
 	delete(instructions)
 }
-
