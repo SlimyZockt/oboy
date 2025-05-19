@@ -1,7 +1,9 @@
 package main
 
 import "core:log"
+import "core:math/bits"
 import "core:testing"
+
 
 @(test)
 test_full_rotate_left_carry :: proc(t: ^testing.T) {
@@ -94,5 +96,22 @@ test_get16 :: proc(t: ^testing.T) {
 	out := get_n16(&cpu, 0)
 	log.infof("%X", out)
 	testing.expect(t, 0x0FFF == out)
+}
+
+@(test)
+test_bitset :: proc(t: ^testing.T) {
+	u: u8 = 0b11111110
+
+	log.infof("%b", u)
+
+	Test :: enum u8 {
+		A,
+		B,
+		C,
+	}
+
+	tmp: ^bit_set[Test] = (^bit_set[Test])(&u)
+
+	log.info(tmp^)
 }
 

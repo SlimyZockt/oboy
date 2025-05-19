@@ -19,6 +19,8 @@ get_reg16 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u16) {
 		return &cpu.registers.DE.full
 	case "HL":
 		return &cpu.registers.HL.full
+	case "SP":
+		return &cpu.registers.SP
 	case:
 		assert(false, "reg16 not defind")
 		return
@@ -441,10 +443,8 @@ inc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	operand := instruction.operands[0]
 
 	if is_reg16(&operand.name) {
-		log.info("inc 16")
 		get_reg16(cpu, &operand.name)^ += 1
 	} else {
-		log.info("inc 8")
 		inc_8(cpu, instruction)
 	}
 
@@ -463,8 +463,6 @@ inc_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	full_res := u16(value^) + 1
 	res := u8(full_res)
 	value^ = res
-
-	log.info("flags")
 
 	flags := &cpu.registers.AF.single.lower
 	flags^ -= {.N}
@@ -495,7 +493,6 @@ jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	}
 
 	cpu.registers.PC = value
-	log.infof("jump to %X", cpu.registers.PC)
 }
 
 jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {

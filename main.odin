@@ -2,6 +2,7 @@ package main
 
 import "base:intrinsics"
 import "base:runtime"
+import "core:c"
 import "core:c/libc"
 import "core:encoding/json"
 import "core:fmt"
@@ -13,6 +14,7 @@ import "core:strconv"
 import "core:strings"
 
 import "vendor:raylib"
+import stbsp "vendor:stb/sprintf"
 
 Address :: u16
 Word :: u8
@@ -315,8 +317,8 @@ Trace_Log :: struct {
 }
 
 trace_log: Trace_Log
-c_context: runtime.Context
-cpu: Cpu
+g_ctx: runtime.Context
+gb: Gameboy
 
 opcode_json :: #load("./opcodes.json")
 
@@ -337,22 +339,67 @@ as_asm :: proc(instruction: ^Instruction) -> string {
 }
 
 sig_handler :: proc "c" (_: libc.int) {
-	context = c_context
+	context = g_ctx
 	for data in trace_log.data {
 		log.fatalf("At %04X: %s", data.pc, as_asm(data.instruction))
-		log.fatalf("Bytes: %X", cpu.memory[data.pc:][:data.instruction.bytes])
+		log.fatalf("Bytes: %X", gb.cpu.memory[data.pc:][:data.instruction.bytes])
 	}
 
 	free_all()
 	runtime.panic("main.panic")
 }
 
+raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, args: ^c.va_list) {
+	context = g_ctx
+
+	level: log.Level
+	switch rl_level {
+	case .TRACE, .DEBUG:
+		level = .Debug
+	case .INFO:
+		level = .Info
+	case .WARNING:
+		level = .Warning
+	case .ERROR:
+		level = .Error
+	case .FATAL:
+		level = .Fatal
+	case .ALL, .NONE:
+		fallthrough
+	case:
+		log.panicf("unexpected log level %v", rl_level)
+	}
+
+	@(static) buf: [dynamic]byte
+	log_len: i32
+	for {
+		buf_len := i32(len(buf))
+		log_len = stbsp.vsnprintf(raw_data(buf), buf_len, message, args)
+		if log_len <= buf_len {
+			break
+		}
+
+		non_zero_resize(&buf, max(128, len(buf) * 2))
+	}
+
+	context.logger.procedure(
+		context.logger.data,
+		level,
+		string(buf[:log_len]),
+		context.logger.options,
+	)
+}
+
+
 main :: proc() {
 	context.logger = log.create_console_logger(.Debug)
+	g_ctx = context
+
+	raylib.SetTraceLogLevel(.ALL)
+	raylib.SetTraceLogCallback(raylib_trace_log)
+
 	libc.signal(libc.SIGSEGV, sig_handler)
 	libc.signal(libc.SIGILL, sig_handler)
-
-	c_context = context
 
 	if len(os.args) != 2 {
 		log.errorf("Wrong number of args (%d)", len(os.args))
@@ -386,14 +433,13 @@ main :: proc() {
 
 	rom_size := len(rom)
 
-	cpu.registers.PC = 0x0100
-	cpu.registers.SP = 0xfffe
+	gb.cpu.registers.PC = 0x0100
+	gb.cpu.registers.SP = 0xfffe
 
 	for i in 0 ..< u16(Memory_Map_End.Rom) {
-		cpu.memory[i] = rom[i]
+		gb.cpu.memory[i] = rom[i]
 	}
-
-	assert(slice.equal(rom[:Memory_Map_End.Rom], cpu.memory[:Memory_Map_End.Rom]))
+	assert(slice.equal(rom[:Memory_Map_End.Rom], gb.cpu.memory[:Memory_Map_End.Rom]))
 
 	raylib.InitWindow(160, 144, "oboy")
 	raylib.SetTargetFPS(30)
@@ -401,19 +447,24 @@ main :: proc() {
 	for !raylib.WindowShouldClose() {
 
 		// for false {
-		opcode := cpu.memory[cpu.registers.PC]
+		opcode := gb.cpu.memory[gb.cpu.registers.PC]
 		instruction := unprefixed_instructions[opcode]
 
 		if instruction.mnemonic == .PREFIX {
-			opcode = cpu.memory[cpu.registers.PC]
+			opcode = gb.cpu.memory[gb.cpu.registers.PC]
 			instruction = prefixed_instructions[opcode]
 		}
 
+		if instruction.mnemonic == .HALT {
+			break
+		}
+
 		trace_data := new(Trace_Data)
-		trace_data^ = {instruction, cpu.registers.PC}
+		trace_data^ = {instruction, gb.cpu.registers.PC}
 		append(&trace_log.data, trace_data)
 
-		execute_instruction(&cpu, instruction)
+		execute_instruction(&gb.cpu, instruction)
+		excute_hardware_register(&gb)
 
 		raylib.BeginDrawing()
 		raylib.ClearBackground(raylib.WHITE)
@@ -536,6 +587,10 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.PC += u16(instruction.bytes)
 }
 
+excute_hardware_register :: proc(gb: ^Gameboy) {
+	handle_lcd(gb)
+}
+
 get_mnemonic_type :: proc(name: string) -> Mnemonic {
 	for val in mnemonic_map {
 		if val.key == name {
@@ -599,3 +654,4 @@ destroy_instructions :: proc(instructions: map[u8]^Instruction) {
 	}
 	delete(instructions)
 }
+
