@@ -588,7 +588,7 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 excute_hardware_register :: proc(gb: ^Gameboy) {
-	handle_lcd(gb)
+	handle_ldc(gb)
 }
 
 get_mnemonic_type :: proc(name: string) -> Mnemonic {
