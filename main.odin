@@ -112,8 +112,10 @@ Register :: struct #raw_union {
 	},
 }
 
+Memory :: [0xFFFF]Word
+
 Cpu :: struct {
-	memory:          [0xFFFF]Word,
+	memory:          Memory,
 	interrupt:       bool,
 	pre_instruction: Mnemonic,
 	registers:       struct {
@@ -132,8 +134,25 @@ Cpu :: struct {
 	},
 }
 
-Gameboy :: struct {
-	cpu: Cpu,
+Data_ID :: u8
+
+Data_Layer :: [255]raylib.Image
+Tile_Map :: [1024 * 2]Data_ID
+Render_Layer :: [360]raylib.Texture2D
+
+Graphics :: struct {
+	render:         struct {
+		window:  Render_Layer,
+		bg:      Render_Layer,
+		objects: Render_Layer,
+	},
+	map_data_layer: Data_Layer,
+	tile_map:       Tile_Map,
+}
+
+Emulator :: struct {
+	cpu:      Cpu,
+	graphics: Graphics,
 }
 
 Flags :: enum {
@@ -152,7 +171,7 @@ Condition :: enum {
 
 Operand_Type :: enum {
 	None,
-	cc,
+	lc,
 	vec,
 	r8,
 	r16,
@@ -166,7 +185,6 @@ Operand_Type :: enum {
 
 Operand :: struct {
 	name:      string,
-	// type:      Operand_Type,
 	immediate: bool,
 	bytes:     Maybe(u8),
 	Modifier:  enum {
@@ -182,10 +200,6 @@ Instruction :: struct {
 	operands:  [dynamic]Operand,
 	immediate: Maybe(bool),
 	flags:     bit_set[Instruction_Flags],
-}
-
-Instruction_Error :: enum {
-	None,
 }
 
 Mnemonic :: enum {
@@ -318,7 +332,7 @@ Trace_Log :: struct {
 
 trace_log: Trace_Log
 g_ctx: runtime.Context
-gb: Gameboy
+emu: Emulator
 
 opcode_json :: #load("./opcodes.json")
 
@@ -342,7 +356,7 @@ sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
 	for data in trace_log.data {
 		log.fatalf("At %04X: %s", data.pc, as_asm(data.instruction))
-		log.fatalf("Bytes: %X", gb.cpu.memory[data.pc:][:data.instruction.bytes])
+		log.fatalf("Bytes: %X", emu.cpu.memory[data.pc:][:data.instruction.bytes])
 	}
 
 	free_all()
@@ -390,6 +404,11 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 	)
 }
 
+gen_image :: proc(layer: ^Data_Layer, color := raylib.GRAY) {
+	for &img in layer {
+		img = raylib.Image(8, 8, color)
+	}
+}
 
 main :: proc() {
 	context.logger = log.create_console_logger(.Debug)
@@ -433,25 +452,44 @@ main :: proc() {
 
 	rom_size := len(rom)
 
-	gb.cpu.registers.PC = 0x0100
-	gb.cpu.registers.SP = 0xfffe
+	emu.cpu.registers.PC = 0x0100
+	emu.cpu.registers.SP = 0xfffe
 
 	for i in 0 ..< u16(Memory_Map_End.Rom) {
-		gb.cpu.memory[i] = rom[i]
+		emu.cpu.memory[i] = rom[i]
 	}
-	assert(slice.equal(rom[:Memory_Map_End.Rom], gb.cpu.memory[:Memory_Map_End.Rom]))
+	assert(slice.equal(rom[:Memory_Map_End.Rom], emu.cpu.memory[:Memory_Map_End.Rom]))
+
 
 	raylib.InitWindow(160, 144, "oboy")
 	raylib.SetTargetFPS(30)
 
-	for !raylib.WindowShouldClose() {
+	gen_image(&emu.graphics.tile_data.bg)
+	gen_image(&emu.graphics.tile_data.objects)
+	gen_image(&emu.graphics.tile_data.window)
 
-		// for false {
-		opcode := gb.cpu.memory[gb.cpu.registers.PC]
+	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{0, 0, 0, 0})
+
+	render_layers := [?]^Render_Layer {
+		&emu.graphics.render.window,
+		&emu.graphics.render.objects,
+		&emu.graphics.render.bg,
+	}
+
+	for layer in render_layers {
+		for &text in layer {
+			text = raylib.LoadTextureFromImage(emtpy_image)
+		}
+	}
+
+	raylib.UnloadImage(emtpy_image)
+
+	for !raylib.WindowShouldClose() {
+		opcode := emu.cpu.memory[emu.cpu.registers.PC]
 		instruction := unprefixed_instructions[opcode]
 
 		if instruction.mnemonic == .PREFIX {
-			opcode = gb.cpu.memory[gb.cpu.registers.PC]
+			opcode = emu.cpu.memory[emu.cpu.registers.PC]
 			instruction = prefixed_instructions[opcode]
 		}
 
@@ -460,19 +498,46 @@ main :: proc() {
 		}
 
 		trace_data := new(Trace_Data)
-		trace_data^ = {instruction, gb.cpu.registers.PC}
+		trace_data^ = {instruction, emu.cpu.registers.PC}
 		append(&trace_log.data, trace_data)
 
-		execute_instruction(&gb.cpu, instruction)
-		excute_hardware_register(&gb)
+		execute_instruction(&emu.cpu, instruction)
+		excute_hardware_register(&emu)
 
 		raylib.BeginDrawing()
 		raylib.ClearBackground(raylib.WHITE)
 		raylib.EndDrawing()
 	}
 
+	image_layers := [?]^Data_Layer {
+		&emu.graphics.tile_data.window,
+		&emu.graphics.tile_data.objects,
+		&emu.graphics.tile_data.bg,
+	}
+
+	for layer in image_layers {
+		for img in layer {
+			raylib.UnloadImage(img)
+		}
+	}
+
+	for layer in render_layers {
+		for text in layer {
+			raylib.UnloadTexture(text)
+		}
+	}
+
+	raylib.UnloadImage(emtpy_image)
 	raylib.CloseWindow()
 	free_all()
+}
+
+draw_layer :: proc(layer: ^Render_Layer) {
+	for y in 0 ..< 18 {
+		for x in 0 ..< 20 {
+			raylib.DrawTexture(layer[17 * y + x], c.int(x) * 8, c.int(y) * 8, raylib.WHITE)
+		}
+	}
 }
 
 execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
@@ -587,8 +652,8 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.PC += u16(instruction.bytes)
 }
 
-excute_hardware_register :: proc(gb: ^Gameboy) {
-	handle_ldc(gb)
+excute_hardware_register :: proc(gb: ^Emulator) {
+	handle_graphics(gb)
 }
 
 get_mnemonic_type :: proc(name: string) -> Mnemonic {
