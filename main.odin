@@ -135,7 +135,6 @@ Cpu :: struct {
 }
 
 Data_ID :: u8
-
 Data_Layer :: [255]raylib.Image
 Tile_Map :: [1024 * 2]Data_ID
 Render_Layer :: [360]raylib.Texture2D
@@ -406,7 +405,7 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 
 gen_image :: proc(layer: ^Data_Layer, color := raylib.GRAY) {
 	for &img in layer {
-		img = raylib.Image(8, 8, color)
+		img = raylib.GenImageColor(8, 8, color)
 	}
 }
 
@@ -464,11 +463,9 @@ main :: proc() {
 	raylib.InitWindow(160, 144, "oboy")
 	raylib.SetTargetFPS(30)
 
-	gen_image(&emu.graphics.tile_data.bg)
-	gen_image(&emu.graphics.tile_data.objects)
-	gen_image(&emu.graphics.tile_data.window)
+	gen_image(&emu.graphics.map_data_layer)
 
-	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{0, 0, 0, 0})
+	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{255, 0, 0, 255})
 
 	render_layers := [?]^Render_Layer {
 		&emu.graphics.render.window,
@@ -480,7 +477,10 @@ main :: proc() {
 		for &text in layer {
 			text = raylib.LoadTextureFromImage(emtpy_image)
 		}
+		log.debug(layer)
 	}
+
+	log.debug(len(emu.graphics.render.bg))
 
 	raylib.UnloadImage(emtpy_image)
 
@@ -509,16 +509,8 @@ main :: proc() {
 		raylib.EndDrawing()
 	}
 
-	image_layers := [?]^Data_Layer {
-		&emu.graphics.tile_data.window,
-		&emu.graphics.tile_data.objects,
-		&emu.graphics.tile_data.bg,
-	}
-
-	for layer in image_layers {
-		for img in layer {
-			raylib.UnloadImage(img)
-		}
+	for img in emu.graphics.map_data_layer {
+		raylib.UnloadImage(img)
 	}
 
 	for layer in render_layers {
@@ -527,17 +519,8 @@ main :: proc() {
 		}
 	}
 
-	raylib.UnloadImage(emtpy_image)
 	raylib.CloseWindow()
 	free_all()
-}
-
-draw_layer :: proc(layer: ^Render_Layer) {
-	for y in 0 ..< 18 {
-		for x in 0 ..< 20 {
-			raylib.DrawTexture(layer[17 * y + x], c.int(x) * 8, c.int(y) * 8, raylib.WHITE)
-		}
-	}
 }
 
 execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {

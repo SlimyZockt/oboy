@@ -3,6 +3,7 @@ package main
 
 import "base:intrinsics"
 import "core:c"
+import "core:log"
 import "core:math"
 import "vendor:raylib"
 
@@ -40,15 +41,31 @@ handle_graphics :: proc(emu: ^Emulator) {
 		emu.graphics.tile_map[i - 0x9800] = cpu.memory[i]
 	}
 
-	//Todo render tilemap
+	for y in 0 ..< 18 {
+		for x in 0 ..< 20 {
+			raylib.UpdateTexture(
+				emu.graphics.render.bg[20 * y + x],
+				emu.graphics.map_data_layer[emu.graphics.tile_map[20 * y + x]].data,
+			)
+
+
+			raylib.DrawTexture(
+				emu.graphics.render.bg[20 * y + x],
+				c.int(x) * 8,
+				c.int(y) * 8,
+				raylib.WHITE,
+			)
+
+		}
+	}
 
 }
 
-grey_color_map := map[Color]raylib.Color {
-	.C0 = raylib.Color{255, 255, 255, 255},
-	.C1 = raylib.Color{169, 169, 169, 255},
-	.C2 = raylib.Color{84, 84, 84, 255},
-	.C2 = raylib.Color{0, 0, 0, 255},
+grey_color_map := [?]raylib.Color {
+	raylib.Color{255, 255, 255, 255},
+	raylib.Color{169, 169, 169, 255},
+	raylib.Color{84, 84, 84, 255},
+	raylib.Color{0, 0, 0, 255},
 }
 
 update_tile_data :: proc(data_layer: ^Data_Layer, addr: Address, mem: ^Memory) {
@@ -67,7 +84,8 @@ update_tile_data :: proc(data_layer: ^Data_Layer, addr: Address, mem: ^Memory) {
 
 				color := Color((high << 1) + low)
 
-				texture[8 * y + x] = grey_color_map[Color(color)]
+				// texture[8 * y + x] = grey_color_map[color]
+				texture[8 * y + x] = raylib.GREEN
 			}
 		}
 
