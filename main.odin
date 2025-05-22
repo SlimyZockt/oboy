@@ -8,6 +8,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:math/bits"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strconv"
@@ -135,18 +136,17 @@ Cpu :: struct {
 }
 
 Data_ID :: u8
-Data_Layer :: [255]raylib.Image
 Tile_Map :: [1024 * 2]Data_ID
-Render_Layer :: [360]raylib.Texture2D
+Render_Layer :: raylib.Texture2D
 
 Graphics :: struct {
-	render:         struct {
+	render:    struct {
 		window:  Render_Layer,
 		bg:      Render_Layer,
 		objects: Render_Layer,
 	},
-	map_data_layer: Data_Layer,
-	tile_map:       Tile_Map,
+	tile_data: ^[256]Tile_Data,
+	tile_map:  Tile_Map,
 }
 
 Emulator :: struct {
@@ -359,7 +359,7 @@ sig_handler :: proc "c" (_: libc.int) {
 	}
 
 	free_all()
-	runtime.panic("main.panic")
+	log.panic("main.panic")
 }
 
 raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, args: ^c.va_list) {
@@ -403,12 +403,6 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 	)
 }
 
-gen_image :: proc(layer: ^Data_Layer, color := raylib.GRAY) {
-	for &img in layer {
-		img = raylib.GenImageColor(8, 8, color)
-	}
-}
-
 main :: proc() {
 	context.logger = log.create_console_logger(.Debug)
 	g_ctx = context
@@ -418,6 +412,28 @@ main :: proc() {
 
 	libc.signal(libc.SIGSEGV, sig_handler)
 	libc.signal(libc.SIGILL, sig_handler)
+
+	when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+				for _, entry in track.allocation_map {
+					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+				}
+			}
+			if len(track.bad_free_array) > 0 {
+				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+				for entry in track.bad_free_array {
+					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
+		}
+	}
 
 	if len(os.args) != 2 {
 		log.errorf("Wrong number of args (%d)", len(os.args))
@@ -431,6 +447,8 @@ main :: proc() {
 		log.error("Can not read file")
 		return
 	}
+	defer delete(rom)
+
 
 	json_data, err := json.parse(opcode_json)
 	if err != .None {
@@ -440,7 +458,6 @@ main :: proc() {
 	}
 	defer json.destroy_value(json_data)
 
-	instruction := new(Instruction)
 	root := json_data.(json.Object)
 
 	unprefixed_instructions := generate_instruction(root["unprefixed"].(json.Object))
@@ -459,28 +476,17 @@ main :: proc() {
 	}
 	assert(slice.equal(rom[:Memory_Map_End.Rom], emu.cpu.memory[:Memory_Map_End.Rom]))
 
-
 	raylib.InitWindow(160, 144, "oboy")
 	raylib.SetTargetFPS(30)
 
-	gen_image(&emu.graphics.map_data_layer)
-
 	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{255, 0, 0, 255})
 
-	render_layers := [?]^Render_Layer {
-		&emu.graphics.render.window,
-		&emu.graphics.render.objects,
-		&emu.graphics.render.bg,
-	}
+	emu.graphics.render.window = raylib.LoadTextureFromImage(emtpy_image)
+	emu.graphics.render.objects = raylib.LoadTextureFromImage(emtpy_image)
+	emu.graphics.render.bg = raylib.LoadTextureFromImage(emtpy_image)
 
-	for layer in render_layers {
-		for &text in layer {
-			text = raylib.LoadTextureFromImage(emtpy_image)
-		}
-		log.debug(layer)
-	}
-
-	log.debug(len(emu.graphics.render.bg))
+	emu.graphics.tile_data = new([256]Tile_Data)
+	defer free(emu.graphics.tile_data)
 
 	raylib.UnloadImage(emtpy_image)
 
@@ -509,18 +515,19 @@ main :: proc() {
 		raylib.EndDrawing()
 	}
 
-	for img in emu.graphics.map_data_layer {
-		raylib.UnloadImage(img)
-	}
-
-	for layer in render_layers {
-		for text in layer {
-			raylib.UnloadTexture(text)
-		}
-	}
+	raylib.UnloadTexture(emu.graphics.render.bg)
+	raylib.UnloadTexture(emu.graphics.render.objects)
+	raylib.UnloadTexture(emu.graphics.render.window)
 
 	raylib.CloseWindow()
-	free_all()
+	defer delete_trace_log(trace_log.data)
+}
+
+delete_trace_log :: proc(trace_log: [dynamic]^Trace_Data) {
+	for t in trace_log {
+		free(t)
+	}
+	delete(trace_log)
 }
 
 execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {

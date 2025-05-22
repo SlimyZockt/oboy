@@ -344,7 +344,7 @@ ccf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 cp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 1, "Wrong amount of operands")
+	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
@@ -1066,7 +1066,7 @@ swap :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 xor :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 1, "Wrong amount of operands")
+	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
