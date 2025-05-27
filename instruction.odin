@@ -64,6 +64,7 @@ get_n16 :: proc(cpu: ^Cpu, offset: u16 = 1) -> u16 {
 	high := cpu.memory[cpu.registers.PC + offset + 1]
 
 	return (u16(high) << 8) + u16(low)
+
 }
 
 get_n8 :: proc(cpu: ^Cpu, offset: u16 = 0) -> u8 {
@@ -501,13 +502,22 @@ jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	first_operand := instruction.operands[0]
 	flags := &cpu.registers.AF.single.lower
-	value := get_n16(cpu)
+	value := get_n8(cpu)
 
 	if operand_count == 2 && !check_condition(flags, get_condition(&first_operand.name)) {
 		return
 	}
 
-	cpu.registers.PC = u16(i16(cpu.registers.PC) - transmute(i16)value)
+	v := cast(i32)value
+	sing := (value >> 7) & 1
+	v2 := transmute(i8)value
+
+	msb, lsb := split_u16(cpu.registers.PC)
+
+	fmt.printfln("%b, %b", v, v2)
+	fmt.println(sing, v, v2)
+	fmt.printfln("%x", i32(u32(cpu.registers.PC)))
+	cpu.registers.PC = u16(i32(cpu.registers.PC) - i32(v2))
 }
 
 ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {

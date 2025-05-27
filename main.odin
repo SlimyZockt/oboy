@@ -335,18 +335,31 @@ emu: Emulator
 
 opcode_json :: #load("./opcodes.json")
 
-as_asm :: proc(instruction: ^Instruction) -> string {
+as_asm :: proc(instruction: ^Instruction, loc: Address) -> string {
 	out: strings.Builder
-	mnemonic, ok := fmt.enum_value_to_string(instruction.mnemonic)
-	if !ok {
-		panic("Instruction mnemonic err")
+	defer delete(out.buf)
+
+	fmt.sbprintf(&out, "%s", instruction.mnemonic)
+	for &operand in instruction.operands {
+		fmt.sbprintf(&out, " %s=", operand.name)
+		switch {
+		case is_reg8(&operand.name):
+			fmt.sbprintf(&out, "%X", u64(get_reg8(&emu.cpu, &operand.name)^))
+		case is_reg16(&operand.name):
+			fmt.sbprintf(&out, "%X", u64(get_reg16(&emu.cpu, &operand.name)^))
+		case operand.name == "n8":
+			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + 1])
+		case operand.name == "n16" || operand.name == "a16":
+			fmt.sbprintf(
+				&out,
+				"%X",
+				(u16(emu.cpu.memory[loc + 2]) << 8) + u16(emu.cpu.memory[loc + 1]),
+			)
+		case:
+			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + 1:][:instruction.bytes])
+		}
 	}
 
-	strings.write_string(&out, mnemonic)
-	for operand in instruction.operands {
-		strings.write_string(&out, " ")
-		strings.write_string(&out, operand.name)
-	}
 
 	return strings.to_string(out)
 }
@@ -354,8 +367,7 @@ as_asm :: proc(instruction: ^Instruction) -> string {
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
 	for data in trace_log.data {
-		log.fatalf("At %04X: %s", data.pc, as_asm(data.instruction))
-		log.fatalf("Bytes: %X", emu.cpu.memory[data.pc:][:data.instruction.bytes])
+		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
 	}
 
 	free_all()
@@ -403,6 +415,14 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 	)
 }
 
+assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+	for data in trace_log.data {
+		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
+	}
+
+	os.exit(1)
+}
+
 main :: proc() {
 	context.logger = log.create_console_logger(.Debug)
 	g_ctx = context
@@ -412,6 +432,9 @@ main :: proc() {
 
 	libc.signal(libc.SIGSEGV, sig_handler)
 	libc.signal(libc.SIGILL, sig_handler)
+
+	context.assertion_failure_proc = assertion_failure_proc
+
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -490,6 +513,7 @@ main :: proc() {
 
 	raylib.UnloadImage(emtpy_image)
 
+	nop_count := 0
 	for !raylib.WindowShouldClose() {
 		opcode := emu.cpu.memory[emu.cpu.registers.PC]
 		instruction := unprefixed_instructions[opcode]
@@ -503,10 +527,22 @@ main :: proc() {
 			break
 		}
 
+		if instruction.mnemonic != .NOP {
+			nop_count = 0
+		} else {
+			nop_count += 1
+		}
+
+		if nop_count == 5 {
+			assert(false, "too many nop")
+		}
+
+
 		trace_data := new(Trace_Data)
 		trace_data^ = {instruction, emu.cpu.registers.PC}
 		append(&trace_log.data, trace_data)
 
+		emu.cpu.memory[0xFF44] = (emu.cpu.memory[0xFF44] + 1) % 154
 		execute_instruction(&emu.cpu, instruction)
 		excute_hardware_register(&emu)
 
@@ -519,6 +555,9 @@ main :: proc() {
 	raylib.UnloadTexture(emu.graphics.render.objects)
 	raylib.UnloadTexture(emu.graphics.render.window)
 
+	for data in trace_log.data {
+		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
+	}
 	raylib.CloseWindow()
 	defer delete_trace_log(trace_log.data)
 }
@@ -620,6 +659,7 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	case .XOR:
 		xor(cpu, instruction)
 	case .NOP:
+	// assert(false, "noop")
 	case .DI, .EI:
 	case:
 		log.error("Not implemented yet")

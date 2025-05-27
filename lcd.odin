@@ -42,17 +42,27 @@ handle_graphics :: proc(emu: ^Emulator) {
 			tile_id := 18 * y + x
 			tile := emu.graphics.tile_data[emu.graphics.tile_map[tile_id]]
 
+			tile_addr := base_addr + u16(emu.graphics.tile_map[tile_id] * 16)
+			data := cpu.memory[tile_addr:][:16]
 			for t_x in 0 ..< 8 {
+				left := data[y * 2]
+				right := data[y * 2 + 1]
 				for t_y in 0 ..< 8 {
-					img_data[(8 * y) + (8 * x) + (8 * t_y + t_x)] = tile[8 * t_y + t_x]
+
+
+					low := (left >> u8(x)) & 1
+					high := (right >> u8(x)) & 1
+
+					color := ((high << 1) + low)
+
+					// texture[8 * y + x] = grey_color_map[color]
+					// tile_data[i][8 * y + x] = grey_color_map[coor]
+					img_data[(8 * y) + (8 * x) + (8 * t_y + t_x)] = data[8 * t_y + t_x]
 				}
 			}
-
 		}
-
 	}
 
-	cpu.memory[0xFF44] = 144
 
 	raylib.UpdateTexture(emu.graphics.render.bg, img_data)
 	raylib.DrawTexturePro(
@@ -91,7 +101,6 @@ update_tile_data :: proc(tile_data: ^[256]Tile_Data, addr: Address, mem: ^Memory
 				color := ((high << 1) + low)
 
 				// texture[8 * y + x] = grey_color_map[color]
-				log.debug(color)
 				tile_data[i][8 * y + x] = grey_color_map[color]
 			}
 		}
