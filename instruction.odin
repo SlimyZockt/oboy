@@ -508,26 +508,29 @@ jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		return
 	}
 
-	v := cast(i32)value
-	sing := (value >> 7) & 1
-	v2 := transmute(i8)value
+	v := cast(i8)value
+	is_singed := (value >> 7) & 1 == 1
 
 	msb, lsb := split_u16(cpu.registers.PC)
+	res := value + lsb
+	carry_bit_7 := (res > 0xFF)
 
-	fmt.printfln("%b, %b", v, v2)
-	fmt.println(sing, v, v2)
-	fmt.printfln("%x", i32(u32(cpu.registers.PC)))
-	cpu.registers.PC = u16(i32(cpu.registers.PC) - i32(v2))
+	adj := 1 if carry_bit_7 && !is_singed else 0
+	adj = -1 if !carry_bit_7 && is_singed else adj
+
+	w := int(msb) + adj
+
+	cpu.registers.PC = u16(i32(cpu.registers.PC) + i32(v))
 }
 
 ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	assert(len(instruction.operands) <= 3, "Wrong amount of operands")
 
 	if len(instruction.operands) == 3 {
-		e8 := transmute(i8)cpu.memory[cpu.registers.PC + 1]
+		e8 := cast(i8)cpu.memory[cpu.registers.PC + 1]
 
 		sp := cpu.registers.SP
-		full_res := i32(transmute(i16)sp) + i32(e8)
+		full_res := i32(cast(i16)sp) + i32(e8)
 		res := u16(full_res)
 
 		cpu.registers.HL.full = res
@@ -606,6 +609,8 @@ ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		n16 := get_n16(cpu)
 
 		get_reg16(cpu, &first_operand.name)^ = n16
+		log.panicf("%x", n16)
+		log.panicf("%x", n16)
 
 	} else if first_operand.name == "n16" && second_operand.name == "SP" {
 		n16 := get_n16(cpu)

@@ -44,11 +44,10 @@ handle_graphics :: proc(emu: ^Emulator) {
 
 			tile_addr := base_addr + u16(emu.graphics.tile_map[tile_id] * 16)
 			data := cpu.memory[tile_addr:][:16]
-			for t_x in 0 ..< 8 {
-				left := data[y * 2]
-				right := data[y * 2 + 1]
-				for t_y in 0 ..< 8 {
-
+			for t_y in 0 ..< 8 {
+				left := data[t_y * 2]
+				right := data[t_y * 2 + 1]
+				for t_x in 0 ..< 8 {
 
 					low := (left >> u8(x)) & 1
 					high := (right >> u8(x)) & 1
@@ -57,7 +56,7 @@ handle_graphics :: proc(emu: ^Emulator) {
 
 					// texture[8 * y + x] = grey_color_map[color]
 					// tile_data[i][8 * y + x] = grey_color_map[coor]
-					img_data[(8 * y) + (8 * x) + (8 * t_y + t_x)] = data[8 * t_y + t_x]
+					img_data[(8 * y) + (8 * x) + (8 * t_y + t_x)] = color
 				}
 			}
 		}

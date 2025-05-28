@@ -185,7 +185,7 @@ Operand_Type :: enum {
 Operand :: struct {
 	name:      string,
 	immediate: bool,
-	bytes:     Maybe(u8),
+	bytes:     u8,
 	Modifier:  enum {
 		None,
 		Decrement,
@@ -331,7 +331,7 @@ Trace_Log :: struct {
 
 trace_log: Trace_Log
 g_ctx: runtime.Context
-emu: Emulator
+emu: Emulator = {}
 
 opcode_json :: #load("./opcodes.json")
 
@@ -340,6 +340,7 @@ as_asm :: proc(instruction: ^Instruction, loc: Address) -> string {
 	defer delete(out.buf)
 
 	fmt.sbprintf(&out, "%s", instruction.mnemonic)
+	operand_loc: u16
 	for &operand in instruction.operands {
 		fmt.sbprintf(&out, " %s=", operand.name)
 		switch {
@@ -347,7 +348,9 @@ as_asm :: proc(instruction: ^Instruction, loc: Address) -> string {
 			fmt.sbprintf(&out, "%X", u64(get_reg8(&emu.cpu, &operand.name)^))
 		case is_reg16(&operand.name):
 			fmt.sbprintf(&out, "%X", u64(get_reg16(&emu.cpu, &operand.name)^))
-		case operand.name == "n8":
+		case operand.name == "e8":
+			fmt.sbprintf(&out, "%X", i8(emu.cpu.memory[loc + 1]))
+		case operand.name == "n8" || operand.name == "a8":
 			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + 1])
 		case operand.name == "n16" || operand.name == "a16":
 			fmt.sbprintf(
@@ -355,9 +358,11 @@ as_asm :: proc(instruction: ^Instruction, loc: Address) -> string {
 				"%X",
 				(u16(emu.cpu.memory[loc + 2]) << 8) + u16(emu.cpu.memory[loc + 1]),
 			)
-		case:
-			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + 1:][:instruction.bytes])
+		case operand.bytes != 0:
+			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + operand_loc + 1:][:operand.bytes])
 		}
+
+		operand_loc += u16(operand.bytes)
 	}
 
 
@@ -507,11 +512,19 @@ main :: proc() {
 	emu.graphics.render.window = raylib.LoadTextureFromImage(emtpy_image)
 	emu.graphics.render.objects = raylib.LoadTextureFromImage(emtpy_image)
 	emu.graphics.render.bg = raylib.LoadTextureFromImage(emtpy_image)
+	raylib.UnloadImage(emtpy_image)
 
 	emu.graphics.tile_data = new([256]Tile_Data)
 	defer free(emu.graphics.tile_data)
 
-	raylib.UnloadImage(emtpy_image)
+	defer {
+		fmt.println("---Start Instrcution Trace Log---")
+		for data in trace_log.data {
+			fmt.printfln("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
+		}
+		delete_trace_log(trace_log.data)
+		fmt.println("---End Instrcution Trace Log---")
+	}
 
 	nop_count := 0
 	for !raylib.WindowShouldClose() {
@@ -555,11 +568,7 @@ main :: proc() {
 	raylib.UnloadTexture(emu.graphics.render.objects)
 	raylib.UnloadTexture(emu.graphics.render.window)
 
-	for data in trace_log.data {
-		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
-	}
 	raylib.CloseWindow()
-	defer delete_trace_log(trace_log.data)
 }
 
 delete_trace_log :: proc(trace_log: [dynamic]^Trace_Data) {
@@ -714,7 +723,7 @@ generate_instruction :: proc(root: json.Object) -> (instructions: map[u8]^Instru
 			operand := operand.(json.Object)
 
 			bytes := operand["bytes"]
-			operands[i].bytes = nil if bytes == nil else u8(bytes.(json.Float))
+			operands[i].bytes = 0 if bytes == nil else u8(bytes.(json.Float))
 			immediate := operand["immediate"]
 			operands[i].immediate = false if immediate == nil else immediate.(json.Boolean)
 
