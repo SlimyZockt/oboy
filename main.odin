@@ -13,6 +13,7 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import inst "instructions"
 
 import "vendor:raylib"
 import stbsp "vendor:stb/sprintf"
@@ -118,7 +119,7 @@ Memory :: [0xFFFF]Word
 Cpu :: struct {
 	memory:          Memory,
 	interrupt:       bool,
-	pre_instruction: Mnemonic,
+	pre_instruction: inst.Mnemonic,
 	registers:       struct {
 		AF: struct #raw_union {
 			full:   u16,
@@ -168,166 +169,26 @@ Condition :: enum {
 	NC,
 }
 
-Operand_Type :: enum {
-	None,
-	lc,
-	vec,
-	r8,
-	r16,
-	a16,
-	u3,
-	a8,
-	e8,
-	n16,
-	n8,
-}
-
-Operand :: struct {
-	name:      string,
-	immediate: bool,
-	bytes:     u8,
-	Modifier:  enum {
-		None,
-		Decrement,
-		Increment,
+Operand_TD :: struct {
+	name: inst.Operand_Name,
+	data: union {
+		u16,
+		u8,
+		[]u8,
+		i8,
 	},
 }
-
-Instruction :: struct {
-	mnemonic:  Mnemonic,
-	bytes:     u8,
-	operands:  [dynamic]Operand,
-	immediate: Maybe(bool),
-	flags:     bit_set[Instruction_Flags],
-}
-
-Mnemonic :: enum {
-	ADC,
-	ADD,
-	AND,
-	BIT,
-	CALL,
-	CCF,
-	CP,
-	CPL,
-	DAA,
-	DEC,
-	DI,
-	EI,
-	HALT,
-	ILLEGAL,
-	INC,
-	JP,
-	JR,
-	LD,
-	LDH,
-	NOP,
-	OR,
-	POP,
-	PREFIX,
-	PUSH,
-	RES,
-	RET,
-	RETI,
-	RL,
-	RLA,
-	RLC,
-	RLCA,
-	RR,
-	RRA,
-	RRC,
-	RRCA,
-	RST,
-	SBC,
-	SCF,
-	SET,
-	SLA,
-	SRA,
-	SRL,
-	STOP,
-	SUB,
-	SWAP,
-	XOR,
-}
-
-Mnemonic_Map :: struct {
-	key: string,
-	val: Mnemonic,
-}
-
-mnemonic_map: []Mnemonic_Map : {
-	{"ADC", .ADC},
-	{"ADD", .ADD},
-	{"AND", .AND},
-	{"BIT", .BIT},
-	{"CALL", .CALL},
-	{"CCF", .CCF},
-	{"CP", .CP},
-	{"CPL", .CPL},
-	{"DAA", .DAA},
-	{"DEC", .DEC},
-	{"DI", .DI},
-	{"EI", .EI},
-	{"HALT", .HALT},
-	{"ILLEGAL_D3", .ILLEGAL},
-	{"ILLEGAL_DB", .ILLEGAL},
-	{"ILLEGAL_DD", .ILLEGAL},
-	{"ILLEGAL_E3", .ILLEGAL},
-	{"ILLEGAL_E4", .ILLEGAL},
-	{"ILLEGAL_EB", .ILLEGAL},
-	{"ILLEGAL_EC", .ILLEGAL},
-	{"ILLEGAL_ED", .ILLEGAL},
-	{"ILLEGAL_F4", .ILLEGAL},
-	{"ILLEGAL_FC", .ILLEGAL},
-	{"ILLEGAL_FD", .ILLEGAL},
-	{"INC", .INC},
-	{"JP", .JP},
-	{"JR", .JR},
-	{"LD", .LD},
-	{"LDH", .LDH},
-	{"NOP", .NOP},
-	{"OR", .OR},
-	{"POP", .POP},
-	{"PREFIX", .PREFIX},
-	{"PUSH", .PUSH},
-	{"RES", .RES},
-	{"RET", .RET},
-	{"RETI", .RETI},
-	{"RL", .RL},
-	{"RLA", .RLA},
-	{"RLC", .RLC},
-	{"RLCA", .RLCA},
-	{"RR", .RR},
-	{"RRA", .RRA},
-	{"RRC", .RRC},
-	{"RRCA", .RRCA},
-	{"RST", .RST},
-	{"SBC", .SBC},
-	{"SCF", .SCF},
-	{"SET", .SET},
-	{"SLA", .SLA},
-	{"SRA", .SRA},
-	{"SRL", .SRL},
-	{"STOP", .STOP},
-	{"SUB", .SUB},
-	{"SWAP", .SWAP},
-	{"XOR", .XOR},
-}
-
-Register16_Names :: []string{"AF", "BC", "DE", "HL", "SP"}
-Register8_Names :: []string{"A", "B", "C", "D", "E", "H", "L"}
-Vec_Names :: []string{"$00", "$08", "$10", "$18", "$20", "$28", "$30", "$38"}
-Index_Names :: []string{"0", "1", "2", "3", "4", "5", "6", "7"}
-Condion_Names :: []string{"Z", "C", "NC", "NZ"}
-
-Trace_Data :: struct {
-	instruction: ^Instruction,
-	pc:          Address,
+Instruction_TD :: struct {
+	pc:       Address,
+	name:     inst.Mnemonic,
+	operands: [dynamic]Operand_TD,
 }
 
 Trace_Log :: struct {
-	data: [dynamic]^Trace_Data,
+	data: [dynamic]^Instruction_TD,
 }
+
+CYCLES :: 70224
 
 trace_log: Trace_Log
 g_ctx: runtime.Context
@@ -335,45 +196,9 @@ emu: Emulator = {}
 
 opcode_json :: #load("./opcodes.json")
 
-as_asm :: proc(instruction: ^Instruction, loc: Address) -> string {
-	out: strings.Builder
-	defer delete(out.buf)
-
-	fmt.sbprintf(&out, "%s", instruction.mnemonic)
-	operand_loc: u16
-	for &operand in instruction.operands {
-		fmt.sbprintf(&out, " %s=", operand.name)
-		switch {
-		case is_reg8(&operand.name):
-			fmt.sbprintf(&out, "%X", u64(get_reg8(&emu.cpu, &operand.name)^))
-		case is_reg16(&operand.name):
-			fmt.sbprintf(&out, "%X", u64(get_reg16(&emu.cpu, &operand.name)^))
-		case operand.name == "e8":
-			fmt.sbprintf(&out, "%X", i8(emu.cpu.memory[loc + 1]))
-		case operand.name == "n8" || operand.name == "a8":
-			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + 1])
-		case operand.name == "n16" || operand.name == "a16":
-			fmt.sbprintf(
-				&out,
-				"%X",
-				(u16(emu.cpu.memory[loc + 2]) << 8) + u16(emu.cpu.memory[loc + 1]),
-			)
-		case operand.bytes != 0:
-			fmt.sbprintf(&out, "%X", emu.cpu.memory[loc + operand_loc + 1:][:operand.bytes])
-		}
-
-		operand_loc += u16(operand.bytes)
-	}
-
-
-	return strings.to_string(out)
-}
-
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
-	for data in trace_log.data {
-		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
-	}
+	print_trace_log()
 
 	free_all()
 	log.panic("main.panic")
@@ -420,26 +245,42 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 	)
 }
 
-assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-	for data in trace_log.data {
-		log.debugf("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
-	}
+print_trace_log :: proc() {
+	fmt.println("---Start Instrcution Trace Log---")
 
+	for instruction in trace_log.data {
+		out: strings.Builder
+		defer delete(out.buf)
+
+		fmt.sbprintf(&out, "0x%04X %s", instruction.pc, instruction.name)
+		for &operand in instruction.operands {
+			fmt.sbprintf(&out, " %s", operand.name)
+			if operand.data == nil do continue
+			fmt.sbprintf(&out, "=%X", operand.data)
+		}
+		str := strings.to_string(out)
+		fmt.println(str)
+	}
+	delete_trace_log(trace_log.data)
+	fmt.println("---End Instrcution Trace Log---")
+}
+
+assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+	print_trace_log()
+	log.fatal(message, location = loc)
 	os.exit(1)
 }
 
 main :: proc() {
-	context.logger = log.create_console_logger(.Debug)
 	g_ctx = context
+
+	context.logger = log.create_console_logger(.Debug)
+	context.assertion_failure_proc = assertion_failure_proc
 
 	raylib.SetTraceLogLevel(.ALL)
 	raylib.SetTraceLogCallback(raylib_trace_log)
-
 	libc.signal(libc.SIGSEGV, sig_handler)
 	libc.signal(libc.SIGILL, sig_handler)
-
-	context.assertion_failure_proc = assertion_failure_proc
-
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -477,29 +318,22 @@ main :: proc() {
 	}
 	defer delete(rom)
 
-
-	json_data, err := json.parse(opcode_json)
-	if err != .None {
-		log.error("Failed to parse the json file.")
-		log.error(err)
-		return
-	}
-	defer json.destroy_value(json_data)
-
-	root := json_data.(json.Object)
-
-	unprefixed_instructions := generate_instruction(root["unprefixed"].(json.Object))
-	defer destroy_instructions(unprefixed_instructions)
-
-	prefixed_instructions := generate_instruction(root["cbprefixed"].(json.Object))
-	defer destroy_instructions(prefixed_instructions)
-
 	rom_size := len(rom)
 
 	emu.cpu.registers.PC = 0x0100
 	emu.cpu.registers.SP = 0xfffe
+	emu.cpu.registers.AF.single.lower = {.Z, .H, .C}
+	emu.cpu.registers.AF.single.upper = 0x01
 
-	for i in 0 ..< u16(Memory_Map_End.Rom) {
+	emu.cpu.registers.BC.single.upper = 0x00
+	emu.cpu.registers.BC.single.lower = 0x13
+	emu.cpu.registers.DE.single.upper = 0x00
+	emu.cpu.registers.DE.single.lower = 0xD8
+	emu.cpu.registers.HL.single.upper = 0x01
+	emu.cpu.registers.HL.single.lower = 0x4D
+	emu.cpu.memory[0xFF0F] = 0xE1
+
+	for i in 0 ..< u16(Memory_Map_End.Switch_Rom) {
 		emu.cpu.memory[i] = rom[i]
 	}
 	assert(slice.equal(rom[:Memory_Map_End.Rom], emu.cpu.memory[:Memory_Map_End.Rom]))
@@ -517,23 +351,51 @@ main :: proc() {
 	emu.graphics.tile_data = new([256]Tile_Data)
 	defer free(emu.graphics.tile_data)
 
-	defer {
-		fmt.println("---Start Instrcution Trace Log---")
-		for data in trace_log.data {
-			fmt.printfln("0x%04X %s", data.pc, as_asm(data.instruction, data.pc))
-		}
-		delete_trace_log(trace_log.data)
-		fmt.println("---End Instrcution Trace Log---")
-	}
-
 	nop_count := 0
 	for !raylib.WindowShouldClose() {
-		opcode := emu.cpu.memory[emu.cpu.registers.PC]
-		instruction := unprefixed_instructions[opcode]
+		waitticks := CYCLES
 
+
+		opcode := emu.cpu.memory[emu.cpu.registers.PC]
+		instruction := inst.Instructions[opcode]
 		if instruction.mnemonic == .PREFIX {
+			emu.cpu.registers.PC += 1
 			opcode = emu.cpu.memory[emu.cpu.registers.PC]
-			instruction = prefixed_instructions[opcode]
+			instruction = inst.Instructions[0xFE + opcode]
+		}
+
+		when ODIN_DEBUG {
+			//Generates data for the trace log
+			trace_data := new(Instruction_TD)
+			trace_data.pc = emu.cpu.registers.PC
+			trace_data.name = instruction.mnemonic
+			trace_data.operands = make([dynamic]Operand_TD, len(instruction.operands))
+			operand_loc := 0
+
+			for operand, i in instruction.operands {
+				trace_data.operands[i].name = operand.name
+				switch {
+				case is_reg8(operand.name):
+					trace_data.operands[i].data = get_reg8(&emu.cpu, operand.name)^
+				case is_reg16(operand.name):
+					trace_data.operands[i].data = get_reg16(&emu.cpu, operand.name)^
+				case operand.name == .O_e8:
+					trace_data.operands[i].data = i8(emu.cpu.memory[trace_data.pc + 1])
+				case operand.name == .O_n8 || operand.name == .O_a8:
+					trace_data.operands[i].data = emu.cpu.memory[trace_data.pc + 1]
+				case operand.name == .O_n16 || operand.name == .O_a16:
+					trace_data.operands[i].data =
+						(u16(emu.cpu.memory[trace_data.pc + 2]) << 8) +
+						u16(emu.cpu.memory[trace_data.pc + 1])
+				case get_condition(operand.name) != nil:
+				case operand.bytes != 0:
+					trace_data.operands[i].data =
+					emu.cpu.memory[int(trace_data.pc) + operand_loc + 1:][:operand.bytes]
+				}
+
+				operand_loc += int(operand.bytes)
+			}
+			append(&trace_log.data, trace_data)
 		}
 
 		if instruction.mnemonic == .HALT {
@@ -546,39 +408,42 @@ main :: proc() {
 			nop_count += 1
 		}
 
-		if nop_count == 5 {
+		if nop_count == 10 {
 			assert(false, "too many nop")
 		}
 
-
-		trace_data := new(Trace_Data)
-		trace_data^ = {instruction, emu.cpu.registers.PC}
-		append(&trace_log.data, trace_data)
-
 		emu.cpu.memory[0xFF44] = (emu.cpu.memory[0xFF44] + 1) % 154
-		execute_instruction(&emu.cpu, instruction)
-		excute_hardware_register(&emu)
 
+		//Do the importend thing 
+		execute_instruction(&emu.cpu, &instruction)
+		handle_graphics(&emu)
+
+		//Cleanup
 		raylib.BeginDrawing()
 		raylib.ClearBackground(raylib.WHITE)
 		raylib.EndDrawing()
 	}
+
 
 	raylib.UnloadTexture(emu.graphics.render.bg)
 	raylib.UnloadTexture(emu.graphics.render.objects)
 	raylib.UnloadTexture(emu.graphics.render.window)
 
 	raylib.CloseWindow()
+	when ODIN_DEBUG {
+		print_trace_log()
+	}
 }
 
-delete_trace_log :: proc(trace_log: [dynamic]^Trace_Data) {
+delete_trace_log :: proc(trace_log: [dynamic]^Instruction_TD) {
 	for t in trace_log {
 		free(t)
+		delete(t.operands)
 	}
 	delete(trace_log)
 }
 
-execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+execute_instruction :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	switch instruction.mnemonic {
 	case .ADC:
 		adc(cpu, instruction)
@@ -602,7 +467,17 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		dec(cpu, instruction)
 	case .HALT:
 		halt(cpu, instruction)
-	case .ILLEGAL:
+	case .ILLEGAL_EB,
+	     .ILLEGAL_FC,
+	     .ILLEGAL_E3,
+	     .ILLEGAL_EC,
+	     .ILLEGAL_FD,
+	     .ILLEGAL_F4,
+	     .ILLEGAL_D3,
+	     .ILLEGAL_DB,
+	     .ILLEGAL_DD,
+	     .ILLEGAL_E4,
+	     .ILLEGAL_ED:
 		#assert(true, "ilLegal instruction gb")
 	case .INC:
 		inc(cpu, instruction)
@@ -619,7 +494,7 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	case .POP:
 		pop(cpu, instruction)
 	case .PREFIX:
-		#assert(true, "prefix instruction")
+		panic("prefix instruction")
 	case .PUSH:
 		push(cpu, instruction)
 	case .RES:
@@ -689,73 +564,5 @@ execute_instruction :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	}
 
 	cpu.registers.PC += u16(instruction.bytes)
-}
-
-excute_hardware_register :: proc(gb: ^Emulator) {
-	handle_graphics(gb)
-}
-
-get_mnemonic_type :: proc(name: string) -> Mnemonic {
-	for val in mnemonic_map {
-		if val.key == name {
-			return val.val
-		}
-	}
-
-	assert(false, "mnemonic is not valid ")
-	return nil
-}
-
-generate_instruction :: proc(root: json.Object) -> (instructions: map[u8]^Instruction) {
-	instructions = make(map[u8]^Instruction, len(root))
-	i := 0
-	for key in root {
-		val := root[key].(json.Object)
-		instruction := new(Instruction)
-
-		instruction.bytes = u8(val["bytes"].(json.Float))
-		instruction.mnemonic = get_mnemonic_type(val["mnemonic"].(json.String))
-
-		json_operands := val["operands"].(json.Array)
-		instruction.operands = make([dynamic]Operand, len(json_operands))
-		operands := &instruction.operands
-		for operand, i in json_operands {
-			operand := operand.(json.Object)
-
-			bytes := operand["bytes"]
-			operands[i].bytes = 0 if bytes == nil else u8(bytes.(json.Float))
-			immediate := operand["immediate"]
-			operands[i].immediate = false if immediate == nil else immediate.(json.Boolean)
-
-			operands[i].name = operand["name"].(json.String)
-
-			operands[i].Modifier = .None
-
-			if operand["increment"] != nil {
-				operands[i].Modifier = .Increment
-			} else if operand["decrement"] != nil {
-				operands[i].Modifier = .Decrement
-			}
-
-		}
-
-		opcode, ok := strconv.parse_u64_maybe_prefixed(key)
-		if !ok {
-			log.panic("key is not a opcode")
-		}
-
-		instructions[u8(opcode)] = instruction
-		i += 1
-	}
-
-	return instructions
-}
-
-destroy_instructions :: proc(instructions: map[u8]^Instruction) {
-	for _, instruction in instructions {
-		delete(instruction.operands)
-		free(instruction)
-	}
-	delete(instructions)
 }
 

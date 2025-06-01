@@ -8,18 +8,19 @@ import "core:math/bits"
 import "core:os"
 import "core:slice"
 import "core:strconv"
+import inst "instructions"
 
-get_reg16 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u16) {
-	switch name^ {
-	case "AF":
+get_reg16 :: proc(cpu: ^Cpu, name: inst.Operand_Name) -> (reg: ^u16) {
+	#partial switch name {
+	case .O_AF:
 		return &cpu.registers.AF.full
-	case "BC":
+	case .O_BC:
 		return &cpu.registers.BC.full
-	case "DE":
+	case .O_DE:
 		return &cpu.registers.DE.full
-	case "HL":
+	case .O_HL:
 		return &cpu.registers.HL.full
-	case "SP":
+	case .O_SP:
 		return &cpu.registers.SP
 	case:
 		assert(false, "reg16 not defind")
@@ -27,23 +28,23 @@ get_reg16 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u16) {
 	}
 }
 
-get_reg8 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u8) {
-	switch name^ {
-	case "A":
+get_reg8 :: proc(cpu: ^Cpu, name: inst.Operand_Name) -> (reg: ^u8) {
+	#partial switch name {
+	case .O_A:
 		return &cpu.registers.AF.single.upper
 	// case "F":
 	// 	return &cpu.registers.AF.single.lower
-	case "B":
+	case .O_B:
 		return &cpu.registers.BC.single.upper
-	case "C":
+	case .O_C:
 		return &cpu.registers.BC.single.lower
-	case "D":
+	case .O_D:
 		return &cpu.registers.DE.single.upper
-	case "E":
+	case .O_E:
 		return &cpu.registers.DE.single.lower
-	case "H":
+	case .O_H:
 		return &cpu.registers.HL.single.upper
-	case "L":
+	case .O_L:
 		return &cpu.registers.HL.single.lower
 	case:
 		assert(true, "reg8 not defind")
@@ -51,24 +52,24 @@ get_reg8 :: proc(cpu: ^Cpu, name: ^string) -> (reg: ^u8) {
 	}
 }
 
-is_reg8 :: proc(name: ^string) -> bool {
-	return slice.contains(Register8_Names, name^)
+is_reg8 :: proc(name: inst.Operand_Name) -> bool {
+	return name in bit_set[inst.Operand_Name]{.O_A, .O_B, .O_C, .O_D, .O_E, .O_H, .O_L}
 }
 
-is_reg16 :: proc(name: ^string) -> bool {
-	return slice.contains(Register16_Names, name^)
+is_reg16 :: proc(name: inst.Operand_Name) -> bool {
+	return name in bit_set[inst.Operand_Name]{.O_AF, .O_BC, .O_DE, .O_HL}
 }
 
 get_n16 :: proc(cpu: ^Cpu, offset: u16 = 1) -> u16 {
 	low := cpu.memory[cpu.registers.PC + offset]
 	high := cpu.memory[cpu.registers.PC + offset + 1]
 
-	return (u16(high) << 8) + u16(low)
+	return u16(low) | (u16(high) << 8)
 
 }
 
 get_n8 :: proc(cpu: ^Cpu, offset: u16 = 0) -> u8 {
-	return cpu.memory[cpu.registers.PC + offset + 1]
+	return cpu.memory[cpu.registers.PC + offset]
 }
 
 split_u16 :: proc(val: u16) -> (msb: u8, lsb: u8) {
@@ -150,34 +151,31 @@ check_condition :: proc(flags: ^bit_set[Flags;u8], condtion: Condition) -> bool 
 	return false
 }
 
-get_condition :: proc(condtion: ^string) -> Condition {
-	switch condtion^ {
-	case "C":
+get_condition :: proc(condtion: inst.Operand_Name) -> Condition {
+	#partial switch condtion {
+	case .O_C:
 		return .C
-	case "NC":
+	case .O_NC:
 		return .NC
-	case "Z":
+	case .O_Z:
 		return .Z
-	case "NZ":
+	case .O_NZ:
 		return .NZ
 	}
-
-
-	assert(false, "Condition error")
 	return nil
 }
 
-adc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+adc :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -197,7 +195,7 @@ adc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ + {.C} if full_res > 0xFF else flags^ - {.C}
 }
 
-add :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+add :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) <= 2, "Wrong amount of operands")
 	if len(instruction.operands) == 1 {
 		add8(cpu, instruction)
@@ -207,7 +205,7 @@ add :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 
-add16 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+add16 :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
 	second_operand := instruction.operands[0]
@@ -216,20 +214,19 @@ add16 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	res: u16
 	half_carry := false
 
-	if first_operand.name == "HL" && is_reg16(&second_operand.name) {
-		r16 := get_reg16(cpu, &second_operand.name)
+	if first_operand.name == .O_HL && is_reg16(second_operand.name) {
+		r16 := get_reg16(cpu, second_operand.name)
 		hl := cpu.registers.HL.full
 
 		full_res = i32(transmute(i16)hl) + i32(transmute(i16)r16^)
 		res = u16(full_res)
 		half_carry = is_half_carried_add(hl, r16^)
 
-	} else if first_operand.name == "SP" && second_operand.name == "e8" {
+	} else if first_operand.name == .O_SP && second_operand.name == .O_e8 {
 		e8: i8 = transmute(i8)(cpu.memory[cpu.registers.PC + 1])
 		full_res = i32(cpu.registers.SP) + i32(transmute(i8)(e8))
 		res = u16(full_res)
 		half_carry = is_half_carried_add(cpu.registers.SP, u16(e8))
-
 	} else {
 		assert(true, "add16: This shoud nerver happen")
 	}
@@ -241,17 +238,17 @@ add16 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ + {.C} if u32(full_res) > 0xFFFF else flags^ - {.C}
 }
 
-add8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+add8 :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -268,17 +265,17 @@ add8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-and :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+and :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -292,16 +289,16 @@ and :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-bit :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+bit :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
 	second_operand := instruction.operands[1]
 
 	value := cpu.memory[cpu.registers.HL.full]
 
-	if is_reg8(&first_operand.name) {
-		value = get_reg8(cpu, &first_operand.name)^
-	} else if first_operand.name == "HL" {
+	if is_reg8(first_operand.name) {
+		value = get_reg8(cpu, first_operand.name)^
+	} else if first_operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -315,13 +312,13 @@ bit :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ += {.H}
 }
 
-call :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+call :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	operand_count := len(instruction.operands)
 	assert(operand_count <= 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
 
 	if operand_count == 2 &&
-	   !check_condition(&cpu.registers.AF.single.lower, get_condition(&first_operand.name)) {
+	   !check_condition(&cpu.registers.AF.single.lower, get_condition(first_operand.name)) {
 		return
 	}
 
@@ -336,7 +333,7 @@ call :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.PC = n
 }
 
-ccf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+ccf :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	flags := &cpu.registers.AF.single.lower
@@ -344,17 +341,17 @@ ccf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ - {.C} if .C in flags^ else flags^ + {.C}
 }
 
-cp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+cp :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -371,7 +368,7 @@ cp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-cpl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+cpl :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	cpu.registers.AF.single.upper = 0xFF - cpu.registers.AF.single.upper
@@ -381,7 +378,7 @@ cpl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-daa :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+daa :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 	adjustment: u8 = 0
 	flags := &cpu.registers.AF.single.lower
@@ -401,25 +398,25 @@ daa :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ + {.Z} if a^ == 0 else flags^ - {.Z}
 }
 
-dec :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+dec :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
-	if is_reg16(&operand.name) {
-		get_reg16(cpu, &operand.name)^ -= 1
+	if is_reg16(operand.name) {
+		get_reg16(cpu, operand.name)^ -= 1
 	} else {
 		dec_8(cpu, instruction)
 	}
 }
 
-dec_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+dec_8 :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 	value: ^u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		value = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -434,30 +431,30 @@ dec_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.AF.single.lower = flags
 }
 
-halt :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+halt :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	//TODO: maybe implement HALT
 }
 
 
-inc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+inc :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
-	if is_reg16(&operand.name) {
-		get_reg16(cpu, &operand.name)^ += 1
+	if is_reg16(operand.name) {
+		get_reg16(cpu, operand.name)^ += 1
 	} else {
 		inc_8(cpu, instruction)
 	}
 
 }
 
-inc_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+inc_8 :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	operand := instruction.operands[0]
 	value: ^u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		value = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -471,23 +468,22 @@ inc_8 :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ + {.H} if is_half_carried_add(value^, 1) else flags^ - {.H}
 }
 
-jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+jp :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	operand_count := len(instruction.operands)
 	assert(operand_count <= 2, "Wrong amount of operands")
 
 	first_operand := instruction.operands[0]
 	flags := &cpu.registers.AF.single.lower
-
 	value: u16
 
-	if operand_count == 2 && !check_condition(flags, get_condition(&first_operand.name)) {
+	if operand_count == 2 && !check_condition(flags, get_condition(first_operand.name)) {
 		return
 	}
 
-	switch first_operand.name {
-	case "a16":
+	#partial switch first_operand.name {
+	case .O_a16:
 		value = get_n16(cpu)
-	case "HL":
+	case .O_HL:
 		value = cpu.registers.HL.full
 	case:
 		value = get_n16(cpu)
@@ -496,7 +492,7 @@ jp :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.PC = value
 }
 
-jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+jr :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	operand_count := len(instruction.operands)
 	assert(operand_count <= 2, "Wrong amount of operands")
 
@@ -504,26 +500,20 @@ jr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags := &cpu.registers.AF.single.lower
 	value := get_n8(cpu)
 
-	if operand_count == 2 && !check_condition(flags, get_condition(&first_operand.name)) {
+	if operand_count == 2 && !check_condition(flags, get_condition(first_operand.name)) {
+		cpu.registers.PC += 1
 		return
 	}
 
 	v := cast(i8)value
-	is_singed := (value >> 7) & 1 == 1
-
-	msb, lsb := split_u16(cpu.registers.PC)
-	res := value + lsb
-	carry_bit_7 := (res > 0xFF)
-
-	adj := 1 if carry_bit_7 && !is_singed else 0
-	adj = -1 if !carry_bit_7 && is_singed else adj
-
-	w := int(msb) + adj
-
+	log.debug(v)
+	log.debugf("%08b", v)
+	log.debugf("%X", cpu.registers.PC)
 	cpu.registers.PC = u16(i32(cpu.registers.PC) + i32(v))
+	log.debugf("%X", cpu.registers.PC)
 }
 
-ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+ld :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) <= 3, "Wrong amount of operands")
 
 	if len(instruction.operands) == 3 {
@@ -549,70 +539,67 @@ ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	first_operand := instruction.operands[0]
 	second_operand := instruction.operands[1]
 
-	if is_reg8(&first_operand.name) && is_reg8(&second_operand.name) {
-		get_reg8(cpu, &first_operand.name)^ = get_reg8(cpu, &second_operand.name)^
+	if is_reg8(first_operand.name) && is_reg8(second_operand.name) {
+		get_reg8(cpu, first_operand.name)^ = get_reg8(cpu, second_operand.name)^
 
-	} else if is_reg8(&first_operand.name) && second_operand.name == "n8" {
-		get_reg8(cpu, &first_operand.name)^ = get_n8(cpu)
+	} else if is_reg8(first_operand.name) && second_operand.name == .O_n8 {
+		get_reg8(cpu, first_operand.name)^ = get_n8(cpu)
 
-	} else if is_reg8(&first_operand.name) && second_operand.name == "HL" {
-		get_reg8(cpu, &first_operand.name)^ = cpu.memory[cpu.registers.HL.full]
+	} else if is_reg8(first_operand.name) && second_operand.name == .O_HL {
+		get_reg8(cpu, first_operand.name)^ = cpu.memory[cpu.registers.HL.full]
 
 		switch second_operand.Modifier {
 		case .None:
 		case .Decrement:
-			assert(first_operand.name == "A")
+			assert(first_operand.name == .O_A)
 			cpu.registers.HL.full -= 1
 		case .Increment:
-			assert(first_operand.name == "A")
+			assert(first_operand.name == .O_A)
 			cpu.registers.HL.full += 1
 		}
 
-	} else if first_operand.name == "HL" && is_reg8(&second_operand.name) {
+	} else if first_operand.name == .O_HL && is_reg8(second_operand.name) {
 		hl_modifier := 0
 
-		cpu.memory[cpu.registers.HL.full] = get_reg8(cpu, &second_operand.name)^
+		cpu.memory[cpu.registers.HL.full] = get_reg8(cpu, second_operand.name)^
 
 		switch first_operand.Modifier {
 		case .None:
 		case .Decrement:
-			assert(second_operand.name == "A")
+			assert(second_operand.name == .O_A)
 			cpu.registers.HL.full -= 1
 		case .Increment:
-			assert(second_operand.name == "A")
+			assert(second_operand.name == .O_A)
 			cpu.registers.HL.full += 1
 		}
 
 
-	} else if first_operand.name == "HL" && second_operand.name == "n8" {
+	} else if first_operand.name == .O_HL && second_operand.name == .O_n8 {
 		cpu.memory[cpu.registers.HL.full] = get_n8(cpu)
 
-	} else if first_operand.name == "A" && second_operand.name == "BC" {
+	} else if first_operand.name == .O_A && second_operand.name == .O_BC {
 		cpu.registers.AF.single.upper = cpu.memory[cpu.registers.BC.full]
 
-	} else if first_operand.name == "A" && second_operand.name == "DE" {
+	} else if first_operand.name == .O_A && second_operand.name == .O_DE {
 		cpu.registers.AF.single.upper = cpu.memory[cpu.registers.DE.full]
 
-	} else if first_operand.name == "BC" && second_operand.name == "A" {
+	} else if first_operand.name == .O_BC && second_operand.name == .O_A {
 		cpu.memory[cpu.registers.BC.full] = cpu.registers.AF.single.upper
 
-	} else if first_operand.name == "DE" && second_operand.name == "A" {
+	} else if first_operand.name == .O_DE && second_operand.name == .O_A {
 		cpu.memory[cpu.registers.DE.full] = cpu.registers.AF.single.upper
 
-	} else if first_operand.name == "A" && second_operand.name == "n16" {
+	} else if first_operand.name == .O_A && second_operand.name == .O_n16 {
 		cpu.registers.AF.single.upper = cpu.memory[get_n16(cpu)]
 
-	} else if first_operand.name == "n16" && second_operand.name == "A" {
+	} else if first_operand.name == .O_n16 && second_operand.name == .O_A {
 		cpu.memory[get_n16(cpu)] = cpu.registers.AF.single.upper
 
-	} else if is_reg16(&first_operand.name) && second_operand.name == "n16" {
+	} else if is_reg16(first_operand.name) && second_operand.name == .O_n16 {
 		n16 := get_n16(cpu)
+		get_reg16(cpu, first_operand.name)^ = n16
 
-		get_reg16(cpu, &first_operand.name)^ = n16
-		log.panicf("%x", n16)
-		log.panicf("%x", n16)
-
-	} else if first_operand.name == "n16" && second_operand.name == "SP" {
+	} else if first_operand.name == .O_n16 && second_operand.name == .O_SP {
 		n16 := get_n16(cpu)
 
 		msb, lsb := split_u16(cpu.registers.SP)
@@ -620,43 +607,43 @@ ld :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 		cpu.memory[n16] = lsb
 		cpu.memory[n16 + 1] = msb
 
-	} else if first_operand.name == "SP" && second_operand.name == "HL" {
+	} else if first_operand.name == .O_SP && second_operand.name == .O_HL {
 		cpu.registers.SP = cpu.registers.HL.full
 	}
 
 }
 
-ldh :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+ldh :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
 	second_operand := instruction.operands[1]
 
-	if first_operand.name == "A" && second_operand.name == "C" {
+	if first_operand.name == .O_A && second_operand.name == .O_C {
 		cpu.registers.AF.single.upper = cpu.memory[0xFF00 + u16(cpu.registers.BC.single.lower)]
 
-	} else if first_operand.name == "C" && second_operand.name == "A" {
+	} else if first_operand.name == .O_C && second_operand.name == .O_A {
 		cpu.memory[0xFF00 + u16(cpu.registers.BC.single.lower)] = cpu.registers.AF.single.upper
 
-	} else if first_operand.name == "A" && second_operand.name == "n8" {
+	} else if first_operand.name == .O_A && second_operand.name == .O_n8 {
 		cpu.registers.AF.single.upper = cpu.memory[0xFF00 + u16(get_n8(cpu))]
 
-	} else if first_operand.name == "n8" && second_operand.name == "A" {
+	} else if first_operand.name == .O_n8 && second_operand.name == .O_A {
 		cpu.memory[0xFF00 + u16(get_n8(cpu))] = cpu.registers.AF.single.upper
 
 	}
 }
 
-or :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+or :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -669,25 +656,25 @@ or :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-pop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+pop :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
-	assert(is_reg16(&operand.name), "Worng operand type")
+	assert(is_reg16(operand.name), "Worng operand type")
 	lsb := cpu.memory[cpu.registers.SP]
 	cpu.registers.SP += 1
 	msb := cpu.memory[cpu.registers.SP]
 	cpu.registers.SP += 1
 
-	get_reg16(cpu, &operand.name)^ = (u16(msb) << 8) + u16(lsb)
+	get_reg16(cpu, operand.name)^ = (u16(msb) << 8) + u16(lsb)
 }
 
-push :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+push :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
-	assert(is_reg16(&operand.name), "Worng operand type")
+	assert(is_reg16(operand.name), "Worng operand type")
 	cpu.registers.SP -= 1
 
-	msb, lsb := split_u16(get_reg16(cpu, &operand.name)^)
+	msb, lsb := split_u16(get_reg16(cpu, operand.name)^)
 
 	cpu.memory[cpu.registers.SP] = msb
 	cpu.registers.SP -= 1
@@ -695,16 +682,16 @@ push :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-res :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+res :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
 	second_operand := instruction.operands[1]
 
 	value: ^u8
 
-	if is_reg8(&first_operand.name) {
-		value = get_reg8(cpu, &first_operand.name)
-	} else if first_operand.name == "HL" {
+	if is_reg8(first_operand.name) {
+		value = get_reg8(cpu, first_operand.name)
+	} else if first_operand.name == .O_HL {
 		value = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -718,14 +705,14 @@ res :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-ret :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+ret :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	operand_count := len(instruction.operands)
 	assert(operand_count <= 1, "Wrong amount of operands")
 
 	if operand_count == 1 &&
 	   !check_condition(
 			   &cpu.registers.AF.single.lower,
-			   get_condition(&instruction.operands[0].name),
+			   get_condition(instruction.operands[0].name),
 		   ) {
 		return
 	}
@@ -741,7 +728,7 @@ ret :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 
-rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rl :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -749,9 +736,9 @@ rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -765,7 +752,7 @@ rl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 
-rla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rla :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	target := &cpu.registers.AF.single.upper
@@ -777,7 +764,7 @@ rla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 }
 
 
-rlc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rlc :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -785,9 +772,9 @@ rlc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -798,7 +785,7 @@ rlc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .Z, .H}
 }
 
-rlca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rlca :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	target := &cpu.registers.AF.single.upper
@@ -811,7 +798,7 @@ rlca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .Z, .H}
 }
 
-rr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rr :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -819,9 +806,9 @@ rr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -834,7 +821,7 @@ rr :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .H}
 }
 
-rra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rra :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	target := &cpu.registers.AF.single.upper
@@ -845,7 +832,7 @@ rra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .Z, .H}
 }
 
-rrc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rrc :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -853,9 +840,9 @@ rrc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -866,7 +853,7 @@ rrc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .Z, .H}
 }
 
-rrca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+rrca :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	target := &cpu.registers.AF.single.upper
@@ -879,21 +866,47 @@ rrca :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .Z, .H}
 }
 
-rst :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	//TODO: RST
+rst :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
+	assert(len(instruction.operands) == 1, "Wrong amount of operands")
+	msb, lsb := split_u16(cpu.registers.PC)
+	cpu.registers.SP -= 1
+	cpu.memory[cpu.registers.SP] = msb
+	cpu.registers.SP -= 1
+	cpu.memory[cpu.registers.SP] = lsb
+
+	addr := 0
+	#partial switch instruction.operands[0].name {
+	case .O_00:
+		addr = 0x00
+	case .O_08:
+		addr = 0x08
+	case .O_10:
+		addr = 0x10
+	case .O_18:
+		addr = 0x18
+	case .O_20:
+		addr = 0x20
+	case .O_28:
+		addr = 0x28
+	case .O_30:
+		addr = 0x30
+	case .O_38:
+		addr = 0x38
+	}
+	cpu.registers.PC = Address(addr)
 }
 
-sbc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+sbc :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -914,7 +927,7 @@ sbc :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	cpu.registers.AF.single.lower = flags
 }
 
-scf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+scf :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 0, "Wrong amount of operands")
 
 	flags := &cpu.registers.AF.single.lower
@@ -922,7 +935,7 @@ scf :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ += {.C}
 }
 
-set :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+set :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	first_operand := instruction.operands[0]
@@ -930,9 +943,9 @@ set :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	value: ^u8
 
-	if is_reg8(&first_operand.name) {
-		value = get_reg8(cpu, &first_operand.name)
-	} else if first_operand.name == "HL" {
+	if is_reg8(first_operand.name) {
+		value = get_reg8(cpu, first_operand.name)
+	} else if first_operand.name == .O_HL {
 		value = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -946,7 +959,7 @@ set :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-sla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+sla :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -954,9 +967,9 @@ sla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -972,7 +985,7 @@ sla :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-sra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+sra :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
@@ -981,9 +994,9 @@ sra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -1004,7 +1017,7 @@ sra :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-srl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+srl :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 
 	target: ^u8
@@ -1012,9 +1025,9 @@ srl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 	operand := instruction.operands[0]
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -1030,21 +1043,21 @@ srl :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 
 }
 
-stop :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+stop :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	//TODO: maybe implement STOP
 }
 
-sub :: proc(cpu: ^Cpu, instruction: ^Instruction) {
-	assert(len(instruction.operands) == 1, "Wrong amount of operands")
+sub :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
+	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 
@@ -1059,15 +1072,15 @@ sub :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ = flags^ + {.C} if is_overflown else flags^ - {.C}
 }
 
-swap :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+swap :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 1, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	target: ^u8
 
-	if is_reg8(&operand.name) {
-		target = get_reg8(cpu, &operand.name)
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		target = get_reg8(cpu, operand.name)
+	} else if operand.name == .O_HL {
 		target = &cpu.memory[cpu.registers.HL.full]
 	}
 
@@ -1080,17 +1093,17 @@ swap :: proc(cpu: ^Cpu, instruction: ^Instruction) {
 	flags^ -= {.N, .H, .C}
 }
 
-xor :: proc(cpu: ^Cpu, instruction: ^Instruction) {
+xor :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
 	assert(len(instruction.operands) == 2, "Wrong amount of operands")
 	operand := instruction.operands[0]
 
 	value: u8
 
-	if is_reg8(&operand.name) {
-		value = get_reg8(cpu, &operand.name)^
-	} else if operand.name == "HL" {
+	if is_reg8(operand.name) {
+		value = get_reg8(cpu, operand.name)^
+	} else if operand.name == .O_HL {
 		value = cpu.memory[cpu.registers.HL.full]
-	} else if operand.name == "n8" {
+	} else if operand.name == .O_n8 {
 		value = get_n8(cpu)
 	}
 

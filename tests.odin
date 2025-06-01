@@ -1,3 +1,4 @@
+#+feature dynamic-literals
 package main
 
 import "core:log"
@@ -113,5 +114,17 @@ test_bitset :: proc(t: ^testing.T) {
 	tmp: ^bit_set[Test] = (^bit_set[Test])(&u)
 
 	log.info(tmp^)
+}
+
+
+@(test)
+test_get_n8 :: proc(t: ^testing.T) {
+	cpu: Cpu
+	cpu.memory[0] = 0xFF
+	cpu.memory[1] = 0x0F
+
+	out := get_n8(&cpu, 0)
+	log.infof("%X", out)
+	testing.expect(t, 0xFF == out)
 }
 
