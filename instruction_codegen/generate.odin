@@ -81,7 +81,9 @@ Instruction :: struct {
 	}
 	fmt.fprintln(f, "}")
 
-	fmt.fprintln(f, `Instructions := [?]Instruction{`)
+	fmt.fprintln(f, `
+@(rodata)
+Instructions := [?]Instruction{`)
 	gen_instruction_data(f, root["unprefixed"].(json.Object))
 	gen_instruction_data(f, root["cbprefixed"].(json.Object))
 	fmt.fprintln(f, `}`)

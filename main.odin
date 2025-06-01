@@ -18,95 +18,6 @@ import inst "instructions"
 import "vendor:raylib"
 import stbsp "vendor:stb/sprintf"
 
-Address :: u16
-Word :: u8
-
-Memory_Map_End :: enum u16 {
-	Rom          = 0x3FFF,
-	Switch_Rom   = 0x7FFF,
-	Vram         = 0x9FFF,
-	External_Ram = 0xBFFF,
-	WRam         = 0xDFFF,
-	Echo_Ram     = 0xFDFF,
-	OAM          = 0xFE9F,
-	Forbidden    = 0xFEFF,
-	Io           = 0xFF7F,
-	Hram         = 0xFFFE,
-	Interupt     = 0xFFFF,
-}
-
-Hardware_Registers :: enum u8 {
-	JOYP     = 0x00,
-	SB       = 0x01,
-	SC       = 0x02,
-	DIV      = 0x04,
-	TIMA     = 0x05,
-	TMA      = 0x06,
-	TAC      = 0x07,
-	IF       = 0x0F,
-	NR10     = 0x10,
-	NR11     = 0x11,
-	NR12     = 0x12,
-	NR13     = 0x13,
-	NR14     = 0x14,
-	NR21     = 0x16,
-	NR22     = 0x17,
-	NR23     = 0x18,
-	NR24     = 0x19,
-	NR30     = 0x1a,
-	NR31     = 0x1b,
-	NR32     = 0x1c,
-	NR33     = 0x1d,
-	NR34     = 0x1e,
-	NR41     = 0x20,
-	NR42     = 0x21,
-	NR43     = 0x22,
-	NR44     = 0x23,
-	NR50     = 0x24,
-	NR51     = 0x25,
-	NR52     = 0x26,
-	Wave_Ram = 0x30,
-	LCDC     = 0x40,
-	STAT     = 0x41,
-	SCY      = 0x42,
-	SCX      = 0x43,
-	LY       = 0x44,
-	LYC      = 0x45,
-	DMA      = 0x46,
-	BGP      = 0x47,
-	OBP0     = 0x48,
-	OBP1     = 0x49,
-	WY       = 0x4a,
-	WX       = 0x4b,
-	KEY1     = 0x4D,
-	VBK      = 0x4F,
-	HDMA1    = 0x51,
-	HDMA2    = 0x52,
-	HDMA3    = 0x53,
-	HDMA4    = 0x54,
-	HDMA5    = 0x55,
-	RP       = 0x56,
-	BCPS     = 0x68,
-	BCPD     = 0x69,
-	OCPS     = 0x6a,
-	OCPD     = 0x6b,
-	OPRI     = 0x6c,
-	SVBK     = 0x70,
-	PCM12    = 0x76,
-	PCM34    = 0x77,
-	IE       = 0xFF,
-}
-
-Instruction_Flags :: enum {
-	None,
-	Zero,
-	One,
-	C,
-	H,
-	N,
-	Z,
-}
-
 Register :: struct #raw_union {
 	full:   u16,
 	single: struct {
@@ -114,10 +25,9 @@ Register :: struct #raw_union {
 	},
 }
 
-Memory :: [0xFFFF]Word
+Memory :: [0xFFFF]u8
 
 Cpu :: struct {
-	memory:          Memory,
 	interrupt:       bool,
 	pre_instruction: inst.Mnemonic,
 	registers:       struct {
@@ -136,23 +46,29 @@ Cpu :: struct {
 	},
 }
 
+Gpu :: struct {
+	controll: u8,
+	scroll_x: u8,
+	scroll_y: u8,
+	scanline: u8,
+	tick:     u8,
+}
+
 Data_ID :: u8
 Tile_Map :: [1024 * 2]Data_ID
 Render_Layer :: raylib.Texture2D
 
 Graphics :: struct {
-	render:    struct {
+	render: struct {
 		window:  Render_Layer,
 		bg:      Render_Layer,
 		objects: Render_Layer,
 	},
-	tile_data: ^[256]Tile_Data,
-	tile_map:  Tile_Map,
 }
 
-Emulator :: struct {
-	cpu:      Cpu,
-	graphics: Graphics,
+Gameboy :: struct {
+	cpu: Cpu,
+	gpu: Gpu,
 }
 
 Flags :: enum {
@@ -188,13 +104,11 @@ Trace_Log :: struct {
 	data: [dynamic]^Instruction_TD,
 }
 
-CYCLES :: 70224
-
 trace_log: Trace_Log
 g_ctx: runtime.Context
-emu: Emulator = {}
 
-opcode_json :: #load("./opcodes.json")
+cpu: Cpu
+gpu: Gpu
 
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
@@ -311,112 +225,81 @@ main :: proc() {
 	}
 
 	rom_path := os.args[1]
-	rom, rom_ok := os.read_entire_file_from_filename(rom_path)
-	if !rom_ok {
+	cartridge, ok := os.read_entire_file_from_filename(rom_path)
+	if !ok {
 		log.error("Can not read file")
 		return
 	}
-	defer delete(rom)
+	defer delete(cartridge)
 
-	rom_size := len(rom)
-
-	emu.cpu.registers.PC = 0x0100
-	emu.cpu.registers.SP = 0xfffe
-	emu.cpu.registers.AF.single.lower = {.Z, .H, .C}
-	emu.cpu.registers.AF.single.upper = 0x01
-
-	emu.cpu.registers.BC.single.upper = 0x00
-	emu.cpu.registers.BC.single.lower = 0x13
-	emu.cpu.registers.DE.single.upper = 0x00
-	emu.cpu.registers.DE.single.lower = 0xD8
-	emu.cpu.registers.HL.single.upper = 0x01
-	emu.cpu.registers.HL.single.lower = 0x4D
-	emu.cpu.memory[0xFF0F] = 0xE1
-
-	for i in 0 ..< u16(Memory_Map_End.Switch_Rom) {
-		emu.cpu.memory[i] = rom[i]
+	for i in 0 ..< 0x8000 {
+		rom[i] = cartridge[i]
 	}
-	assert(slice.equal(rom[:Memory_Map_End.Rom], emu.cpu.memory[:Memory_Map_End.Rom]))
+	assert(slice.equal(rom[:0x8000], cartridge[:0x8000]))
+	cartridge_size := len(cartridge)
+
+	{ 	// skip Bootloader
+		using Hardware_Registers
+		cpu.registers.PC = 0x0100
+		cpu.registers.SP = 0xfffe
+		cpu.registers.AF.single.lower = {.Z, .H, .C}
+		cpu.registers.AF.single.upper = 0x01
+
+		cpu.registers.BC.single.upper = 0x00
+		cpu.registers.BC.single.lower = 0x13
+		cpu.registers.DE.single.upper = 0x00
+		cpu.registers.DE.single.lower = 0xD8
+		cpu.registers.HL.single.upper = 0x01
+		cpu.registers.HL.single.lower = 0x4D
+	}
 
 	raylib.InitWindow(160, 144, "oboy")
 	raylib.SetTargetFPS(30)
 
 	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{255, 0, 0, 255})
 
-	emu.graphics.render.window = raylib.LoadTextureFromImage(emtpy_image)
-	emu.graphics.render.objects = raylib.LoadTextureFromImage(emtpy_image)
-	emu.graphics.render.bg = raylib.LoadTextureFromImage(emtpy_image)
 	raylib.UnloadImage(emtpy_image)
-
-	emu.graphics.tile_data = new([256]Tile_Data)
-	defer free(emu.graphics.tile_data)
 
 	nop_count := 0
 	for !raylib.WindowShouldClose() {
-		waitticks := CYCLES
-
-
-		opcode := emu.cpu.memory[emu.cpu.registers.PC]
+		opcode := rom[cpu.registers.PC]
 		instruction := inst.Instructions[opcode]
 		if instruction.mnemonic == .PREFIX {
-			emu.cpu.registers.PC += 1
-			opcode = emu.cpu.memory[emu.cpu.registers.PC]
+			cpu.registers.PC += 1
+			opcode = rom[cpu.registers.PC]
 			instruction = inst.Instructions[0xFE + opcode]
 		}
 
 		when ODIN_DEBUG {
 			//Generates data for the trace log
 			trace_data := new(Instruction_TD)
-			trace_data.pc = emu.cpu.registers.PC
+			trace_data.pc = cpu.registers.PC
 			trace_data.name = instruction.mnemonic
 			trace_data.operands = make([dynamic]Operand_TD, len(instruction.operands))
 			operand_loc := 0
-
-			for operand, i in instruction.operands {
-				trace_data.operands[i].name = operand.name
-				switch {
-				case is_reg8(operand.name):
-					trace_data.operands[i].data = get_reg8(&emu.cpu, operand.name)^
-				case is_reg16(operand.name):
-					trace_data.operands[i].data = get_reg16(&emu.cpu, operand.name)^
-				case operand.name == .O_e8:
-					trace_data.operands[i].data = i8(emu.cpu.memory[trace_data.pc + 1])
-				case operand.name == .O_n8 || operand.name == .O_a8:
-					trace_data.operands[i].data = emu.cpu.memory[trace_data.pc + 1]
-				case operand.name == .O_n16 || operand.name == .O_a16:
-					trace_data.operands[i].data =
-						(u16(emu.cpu.memory[trace_data.pc + 2]) << 8) +
-						u16(emu.cpu.memory[trace_data.pc + 1])
-				case get_condition(operand.name) != nil:
-				case operand.bytes != 0:
-					trace_data.operands[i].data =
-					emu.cpu.memory[int(trace_data.pc) + operand_loc + 1:][:operand.bytes]
-				}
-
-				operand_loc += int(operand.bytes)
-			}
 			append(&trace_log.data, trace_data)
+
+
+			if instruction.mnemonic != .NOP {
+				nop_count = 0
+			} else {
+				nop_count += 1
+			}
+
+			if nop_count == 10 {
+				panic("too many nop")
+			}
 		}
 
 		if instruction.mnemonic == .HALT {
 			break
 		}
 
-		if instruction.mnemonic != .NOP {
-			nop_count = 0
-		} else {
-			nop_count += 1
-		}
-
-		if nop_count == 10 {
-			assert(false, "too many nop")
-		}
-
-		emu.cpu.memory[0xFF44] = (emu.cpu.memory[0xFF44] + 1) % 154
+		// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
 
 		//Do the importend thing 
-		execute_instruction(&emu.cpu, &instruction)
-		handle_graphics(&emu)
+		execute_instruction(&cpu, opcode)
+		// handle_graphics(&cpu)
 
 		//Cleanup
 		raylib.BeginDrawing()
@@ -424,10 +307,6 @@ main :: proc() {
 		raylib.EndDrawing()
 	}
 
-
-	raylib.UnloadTexture(emu.graphics.render.bg)
-	raylib.UnloadTexture(emu.graphics.render.objects)
-	raylib.UnloadTexture(emu.graphics.render.window)
 
 	raylib.CloseWindow()
 	when ODIN_DEBUG {
@@ -441,128 +320,5 @@ delete_trace_log :: proc(trace_log: [dynamic]^Instruction_TD) {
 		delete(t.operands)
 	}
 	delete(trace_log)
-}
-
-execute_instruction :: proc(cpu: ^Cpu, instruction: ^inst.Instruction) {
-	switch instruction.mnemonic {
-	case .ADC:
-		adc(cpu, instruction)
-	case .ADD:
-		add(cpu, instruction)
-	case .AND:
-		and(cpu, instruction)
-	case .BIT:
-		bit(cpu, instruction)
-	case .CALL:
-		call(cpu, instruction)
-	case .CCF:
-		ccf(cpu, instruction)
-	case .CP:
-		cp(cpu, instruction)
-	case .CPL:
-		cpl(cpu, instruction)
-	case .DAA:
-		daa(cpu, instruction)
-	case .DEC:
-		dec(cpu, instruction)
-	case .HALT:
-		halt(cpu, instruction)
-	case .ILLEGAL_EB,
-	     .ILLEGAL_FC,
-	     .ILLEGAL_E3,
-	     .ILLEGAL_EC,
-	     .ILLEGAL_FD,
-	     .ILLEGAL_F4,
-	     .ILLEGAL_D3,
-	     .ILLEGAL_DB,
-	     .ILLEGAL_DD,
-	     .ILLEGAL_E4,
-	     .ILLEGAL_ED:
-		#assert(true, "ilLegal instruction gb")
-	case .INC:
-		inc(cpu, instruction)
-	case .JP:
-		jp(cpu, instruction)
-	case .JR:
-		jr(cpu, instruction)
-	case .LD:
-		ld(cpu, instruction)
-	case .LDH:
-		ldh(cpu, instruction)
-	case .OR:
-		or(cpu, instruction)
-	case .POP:
-		pop(cpu, instruction)
-	case .PREFIX:
-		panic("prefix instruction")
-	case .PUSH:
-		push(cpu, instruction)
-	case .RES:
-		res(cpu, instruction)
-	case .RET:
-		ret(cpu, instruction)
-	case .RETI:
-		ret(cpu, instruction)
-		cpu.interrupt = true
-	case .RL:
-		rl(cpu, instruction)
-	case .RLA:
-		rla(cpu, instruction)
-	case .RLC:
-		rlc(cpu, instruction)
-	case .RLCA:
-		rlca(cpu, instruction)
-	case .RR:
-		rr(cpu, instruction)
-	case .RRA:
-		rra(cpu, instruction)
-	case .RRC:
-		rrc(cpu, instruction)
-	case .RRCA:
-		rrca(cpu, instruction)
-	case .RST:
-		rst(cpu, instruction)
-	case .SBC:
-		sbc(cpu, instruction)
-	case .SCF:
-		scf(cpu, instruction)
-	case .SET:
-		set(cpu, instruction)
-	case .SLA:
-		sla(cpu, instruction)
-	case .SRA:
-		sra(cpu, instruction)
-	case .SRL:
-		srl(cpu, instruction)
-	case .STOP:
-		stop(cpu, instruction)
-	case .SUB:
-		sub(cpu, instruction)
-	case .SWAP:
-		swap(cpu, instruction)
-	case .XOR:
-		xor(cpu, instruction)
-	case .NOP:
-	// assert(false, "noop")
-	case .DI, .EI:
-	case:
-		log.error("Not implemented yet")
-	}
-
-	#partial switch cpu.pre_instruction {
-	case .DI:
-		cpu.interrupt = false
-	case .EI:
-		cpu.interrupt = true
-	}
-
-	cpu.pre_instruction = instruction.mnemonic
-
-	#partial switch instruction.mnemonic {
-	case .CALL, .JP, .JR, .RET, .RETI, .RST:
-		return
-	}
-
-	cpu.registers.PC += u16(instruction.bytes)
 }
 
