@@ -26,9 +26,13 @@ Register :: struct #raw_union {
 }
 
 Memory :: [0xFFFF]u8
+Interrupt :: enum u8 {}
 
 Cpu :: struct {
-	interrupt:       bool,
+	interrupt:       struct {
+		flags:  bit_set[Interrupt;u8],
+		enable: bool,
+	},
 	pre_instruction: inst.Mnemonic,
 	registers:       struct {
 		AF: struct #raw_union {
@@ -239,7 +243,6 @@ main :: proc() {
 	cartridge_size := len(cartridge)
 
 	{ 	// skip Bootloader
-		using Hardware_Registers
 		cpu.registers.PC = 0x0100
 		cpu.registers.SP = 0xfffe
 		cpu.registers.AF.single.lower = {.Z, .H, .C}
