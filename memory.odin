@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 import "core:math/rand"
 import "core:slice"
 import inst "instructions"
@@ -613,7 +614,8 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == HR_Address[Hardware_Registers.SCX]:
 		return gpu.scroll_x
 	case address == HR_Address[Hardware_Registers.JOYP]:
-		assert(false, "todo")
+		// assert(false, "todo")
+		log.warn("JOYP not implemnted yet")
 		return 0
 	case address == HR_Address[Hardware_Registers.IF]:
 		return u8(cpu.interrupt.enable)
@@ -662,11 +664,17 @@ write_u8 :: proc(address: Address, value: u8) {
 	case address == HR_Address[Hardware_Registers.DMA]:
 		copy(MM_Start[MM.OAM], Address(value << 8), 160)
 	case address == HR_Address[Hardware_Registers.BGP]:
-		assert(false, "todo")
+		for &color, i in bg_palette {
+			color = palette[(value >> (u8(i) * 2)) & 3]
+		}
 	case address == HR_Address[Hardware_Registers.OBP0]:
-		assert(false, "todo")
+		for &color, i in sprite_palettes[0] {
+			color = palette[(value >> (u8(i) * 2)) & 3]
+		}
 	case address == HR_Address[Hardware_Registers.OBP1]:
-		assert(false, "todo")
+		for &color, i in sprite_palettes[1] {
+			color = palette[(value >> (u8(i) * 2)) & 3]
+		}
 	case is_address_in_mm(address, MM.IO):
 		hram[address - MM_End[MM.IO]] = value
 	}
