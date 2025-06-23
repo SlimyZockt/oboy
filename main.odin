@@ -13,9 +13,9 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
-import inst "instructions"
-
 import "vendor:raylib"
+
+import inst "instructions"
 import stbsp "vendor:stb/sprintf"
 
 Register :: struct #raw_union {
@@ -25,7 +25,6 @@ Register :: struct #raw_union {
 	},
 }
 
-Memory :: [0xFFFF]u8
 Interrupt :: enum u8 {}
 
 Cpu :: struct {
@@ -33,19 +32,37 @@ Cpu :: struct {
 		flags:  bit_set[Interrupt;u8],
 		enable: bool,
 	},
+	PC:              Address,
 	pre_instruction: inst.Mnemonic,
 	registers:       struct {
 		AF: struct #raw_union {
 			full:   u16,
 			single: struct {
-				lower: bit_set[Flags;u8],
-				upper: u8,
+				F: bit_set[Flags;u8],
+				A: u8,
 			},
 		},
-		BC: Register,
-		DE: Register,
-		HL: Register,
-		PC: Address,
+		BC: struct #raw_union {
+			full:   u16,
+			single: struct {
+				C: u8,
+				B: u8,
+			},
+		},
+		DE: struct #raw_union {
+			full:   u16,
+			single: struct {
+				E: u8,
+				D: u8,
+			},
+		},
+		HL: struct #raw_union {
+			full:   u16,
+			single: struct {
+				L: u8,
+				H: u8,
+			},
+		},
 		SP: Address,
 	},
 }
@@ -82,15 +99,8 @@ Flags :: enum {
 	C,
 }
 
-Condition :: enum {
-	NZ,
-	Z,
-	C,
-	NC,
-}
-
 Operand_TD :: struct {
-	name: inst.Operand_Name,
+	// name: inst.Operand_Name,
 	data: union {
 		u16,
 		u8,
@@ -172,7 +182,6 @@ print_trace_log :: proc() {
 
 		fmt.sbprintf(&out, "0x%04X %s", instruction.pc, instruction.name)
 		for &operand in instruction.operands {
-			fmt.sbprintf(&out, " %s", operand.name)
 			if operand.data == nil do continue
 			fmt.sbprintf(&out, "=%X", operand.data)
 		}
@@ -243,17 +252,10 @@ main :: proc() {
 	cartridge_size := len(cartridge)
 
 	{ 	// skip Bootloader
-		cpu.registers.PC = 0x0100
+		cpu.PC = 0x0100
 		cpu.registers.SP = 0xfffe
-		cpu.registers.AF.single.lower = {.Z, .H, .C}
-		cpu.registers.AF.single.upper = 0x01
-
-		cpu.registers.BC.single.upper = 0x00
-		cpu.registers.BC.single.lower = 0x13
-		cpu.registers.DE.single.upper = 0x00
-		cpu.registers.DE.single.lower = 0xD8
-		cpu.registers.HL.single.upper = 0x01
-		cpu.registers.HL.single.lower = 0x4D
+		cpu.registers.AF.single.F = {.Z, .H, .C}
+		cpu.registers.AF.single.A = 0x01
 	}
 
 	raylib.InitWindow(160, 144, "oboy")
@@ -265,20 +267,19 @@ main :: proc() {
 
 	nop_count := 0
 	for !raylib.WindowShouldClose() {
-		opcode := rom[cpu.registers.PC]
-		instruction := inst.Instructions[opcode]
+		opcode := rom[cpu.PC]
+		instruction := inst.UnprefixedInstructions[opcode]
 		if instruction.mnemonic == .PREFIX {
-			cpu.registers.PC += 1
-			opcode = rom[cpu.registers.PC]
-			instruction = inst.Instructions[0xFE + opcode]
+			cpu.PC += 1
+			opcode = rom[cpu.PC]
+			instruction = inst.PrefixedInstructions[0xFE + opcode]
 		}
 
 		when ODIN_DEBUG {
 			//Generates data for the trace log
 			trace_data := new(Instruction_TD)
-			trace_data.pc = cpu.registers.PC
+			trace_data.pc = cpu.PC
 			trace_data.name = instruction.mnemonic
-			trace_data.operands = make([dynamic]Operand_TD, len(instruction.operands))
 			operand_loc := 0
 			append(&trace_log.data, trace_data)
 
@@ -301,7 +302,7 @@ main :: proc() {
 		// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
 
 		//Do the importend thing 
-		execute_instruction(&cpu, opcode)
+		execute_instruction(opcode)
 		// handle_graphics(&cpu)
 
 		//Cleanup

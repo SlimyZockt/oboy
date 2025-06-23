@@ -88,3 +88,25 @@ test_u16_to_i8 :: proc(t: ^testing.T) {
 	log.info(u16(i - i16(transmute(i8)u)))
 }
 
+
+@(test)
+test_bit_set :: proc(t: ^testing.T) {
+	set := bit_set[TestE]{.A, .B}
+
+	set ~= {.C}
+
+	testing.expect(t, set == {.A, .B, .C})
+	// cpu.registers.AF.single.F += {.Z} if true else -{.Z}
+
+
+	set ~= {.C}
+	testing.expect(t, set == {.A, .B})
+}
+
+
+TestE :: enum {
+	A,
+	B,
+	C,
+}
+

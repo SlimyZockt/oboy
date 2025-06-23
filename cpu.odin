@@ -1,6 +1,7 @@
 package main
 
 import "core:os"
+import inst "instructions"
 
 ConditionCode :: enum u8 {
 	Z,
@@ -24,6 +25,8 @@ n16 :: distinct u16
 e8 :: distinct i8
 
 R16 :: enum u8 {
+	AF,
+	SP,
 	BC,
 	HL,
 	DE,
@@ -40,11 +43,23 @@ VEC :: enum {
 	V38 = 0x38,
 }
 
+toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
+	if cond {
+		cpu.registers.AF.single.F += {flag}
+	} else {
+		cpu.registers.AF.single.F -= {flag}
+	}
+}
+
 execute_instruction :: proc(opcode: u8) {
 	switch opcode {
+	// NOOP
 	case 0x0:
+		break
 	case 0x1:
+		ld_r16_n16(.BC)
 	case 0x2:
+		ld_r16_A(.BC)
 	case 0x3:
 	case 0x4:
 	case 0x5:
@@ -299,11 +314,8 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xfe:
 	case 0xff:
 	}
-}
 
-jump_rel :: proc(cc: ConditionCode) {
-	read_u8(cpu.registers.SP)
-
+	cpu.PC += Address(inst.PrefixedInstructions[opcode].bytes)
 }
 
 
@@ -566,5 +578,114 @@ execute_prefixed_instruction :: proc(opcode: u8) {
 	case 0xfe:
 	case 0xff:
 	}
+}
+
+
+jump_rel :: proc($cc: ConditionCode) {
+	if check_condition_code(cc) {
+		cpu.registers.PC = Address(i16(cpu.PC) + i16(read_u8(cpu.registers.SP)))
+	}
+}
+
+ld_r8_r8 :: proc($r8_0: R8, $r8_1: R8) {
+	get_reg8(r8_0)^ = get_reg8(r8_1)^
+}
+
+ld_r8_n8 :: proc($r8: R8) {
+	get_reg8(r8)^ = read_u8(cpu.PC)
+}
+
+
+ld_r16_n16 :: proc($r16: R16) {
+	get_reg16(r16)^ = read_u16(cpu.PC)
+}
+
+ld_n16_A :: proc($r16: R16) {
+	write_u8(get_reg16(r16), cpu.registers.AF.single.A)
+}
+
+ld_A_n16 :: proc($r16: R16) {
+	cpu.registers.AF.single.A = read_u8(get_reg16(r16))
+}
+
+ldh_n8_A :: proc() {
+	n := u16(read_u8(cpu.PC))
+	cpu.registers.AF.single.A = read_u8(Address(0xFF00 + n))
+}
+
+ld_r16_r16 :: proc($r16_0: R16, $r16_1: R16) {
+	get_reg16(r16_0)^ = get_reg16(r16_1)^
+}
+
+ldh_A_n8 :: proc() {
+	n := u16(read_u8(cpu.PC))
+	write_u8(Address(0xFF00 + n), cpu.registers.AF.single.A)
+}
+
+ldh_A_C :: proc() {
+	cpu.registers.AF.single.A = read_u8(Address(0xFF00 + u16(cpu.registers.BC.single.C)))
+}
+
+ldh_C_A :: proc() {
+	write_u8(Address(0xFF00 + u16(cpu.registers.BC.single.C)), cpu.registers.AF.single.A)
+}
+
+ld_r16_A :: proc($r16: R16) {
+	cpu.registers.AF.single.A = read_u8(Address(get_reg16(r16)^))
+}
+
+ld_n16_A :: proc() {
+
+}
+
+
+inc8 :: proc($r8: R8) {
+	target := get_reg8(r8)
+	target^ += 1
+
+	toggle_flag(target == 0, .Z)
+	toggle_flag(is_half_carried_add(target, 1), .H)
+	cpu.registers.AF.single.F -= {.N}
+}
+
+dec8 :: proc($r8: R8) {
+	target := get_reg8(r8)
+	target^ -= 1
+
+	toggle_flag(target == 0, .Z)
+	toggle_flag(is_half_carried_add(target, 1), .H)
+	cpu.registers.AF.single.F += {.N}
+}
+
+inc_hl :: proc() {
+	target := read_u8(Address(cpu.registers.HL.full))
+	target += 1
+
+	write_u8(Address(cpu.registers.HL.full), target)
+
+	toggle_flag(target == 0, .Z)
+	toggle_flag(is_half_carried_add(target, 1), .H)
+	cpu.registers.AF.single.F -= {.N}
+}
+
+dec_hl :: proc($r8: R8) {
+	target := read_u8(Address(cpu.registers.HL.full))
+	target^ -= 1
+
+	write_u8(Address(cpu.registers.HL.full), target)
+
+	toggle_flag(target == 0, .Z)
+	toggle_flag(is_half_carried_add(target, 1), .H)
+	cpu.registers.AF.single.F += {.N}
+}
+
+inc16 :: proc($r16: R16) {
+	target := get_reg8(r16)
+	target^ += 1
+}
+
+dec16 :: proc($r16: R16) {
+	target := get_reg16(r16)
+	target^ -= 1
 }
 

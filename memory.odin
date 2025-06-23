@@ -441,52 +441,42 @@ oam: [0x100]u8
 wram: [0x2000]u8
 hram: [0x80]u8
 
-get_reg16 :: proc(cpu: ^Cpu, name: inst.Operand_Name) -> (reg: ^u16) {
-	#partial switch name {
-	case .O_AF:
+get_reg16 :: proc(r8: R16) -> (reg: ^u16) {
+	switch r8 {
+	case .AF:
 		return &cpu.registers.AF.full
-	case .O_BC:
+	case .BC:
 		return &cpu.registers.BC.full
-	case .O_DE:
+	case .DE:
 		return &cpu.registers.DE.full
-	case .O_HL:
+	case .HL:
 		return &cpu.registers.HL.full
-	case .O_SP:
+	case .SP:
 		return transmute(^u16)&cpu.registers.SP
 	}
 
 	panic("reg16 not defind")
 }
 
-get_reg8 :: proc(cpu: ^Cpu, name: inst.Operand_Name) -> (reg: ^u8) {
-	#partial switch name {
-	case .O_A:
-		return &cpu.registers.AF.single.upper
-	// case "F":
-	// 	return &cpu.registers.AF.single.lower
-	case .O_B:
-		return &cpu.registers.BC.single.upper
-	case .O_C:
-		return &cpu.registers.BC.single.lower
-	case .O_D:
-		return &cpu.registers.DE.single.upper
-	case .O_E:
-		return &cpu.registers.DE.single.lower
-	case .O_H:
-		return &cpu.registers.HL.single.upper
-	case .O_L:
-		return &cpu.registers.HL.single.lower
+get_reg8 :: proc(r8: R8) -> (reg: ^u8) {
+	switch r8 {
+	case .A:
+		return &cpu.registers.AF.single.A
+	case .B:
+		return &cpu.registers.BC.single.B
+	case .C:
+		return &cpu.registers.BC.single.C
+	case .D:
+		return &cpu.registers.DE.single.D
+	case .E:
+		return &cpu.registers.DE.single.E
+	case .H:
+		return &cpu.registers.HL.single.H
+	case .L:
+		return &cpu.registers.HL.single.L
 	}
 
 	panic("reg8 not defind")
-}
-
-is_reg8 :: proc(name: inst.Operand_Name) -> bool {
-	return name in bit_set[inst.Operand_Name]{.O_A, .O_B, .O_C, .O_D, .O_E, .O_H, .O_L}
-}
-
-is_reg16 :: proc(name: inst.Operand_Name) -> bool {
-	return name in bit_set[inst.Operand_Name]{.O_AF, .O_BC, .O_DE, .O_HL}
 }
 
 
@@ -552,34 +542,22 @@ rotate_right :: proc(val: ^u8) -> (lsb: u8) {
 	return
 }
 
-check_condition :: proc(flags: ^bit_set[Flags;u8], condtion: Condition) -> bool {
+check_condition_code :: proc(condtion: ConditionCode) -> bool {
 	switch condtion {
 	case .NZ:
-		return .Z not_in flags
+		return .Z not_in cpu.registers.AF.single.F
 	case .Z:
-		return .Z in flags
+		return .Z in cpu.registers.AF.single.F
 	case .NC:
-		return .C not_in flags
+		return .C not_in cpu.registers.AF.single.F
 	case .C:
-		return .C in flags
+		return .C in cpu.registers.AF.single.F
+	case nil:
+		return true
 	}
-
 	panic("Condition error")
 }
 
-get_condition :: proc(condtion: inst.Operand_Name) -> Condition {
-	#partial switch condtion {
-	case .O_C:
-		return .C
-	case .O_NC:
-		return .NC
-	case .O_Z:
-		return .Z
-	case .O_NZ:
-		return .NZ
-	}
-	return nil
-}
 
 @(private)
 is_address_in_mm :: #force_inline proc(address: Address, $range: MM) -> bool {
@@ -627,7 +605,7 @@ read_u8 :: proc(address: Address) -> u8 {
 		return oam[address - MM_End[MM.IO]]
 	}
 
-	panic("invalid Address")
+	log.panicf("Adress: %v is invalid;", address)
 }
 
 
@@ -679,7 +657,7 @@ write_u8 :: proc(address: Address, value: u8) {
 		hram[address - MM_End[MM.IO]] = value
 	}
 
-	panic("invalid Address")
+	log.panicf("Adress: %v is invalid;", address)
 }
 
 write_u16 :: proc(address: Address, value: u16) {
