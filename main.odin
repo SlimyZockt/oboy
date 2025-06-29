@@ -33,6 +33,7 @@ Cpu :: struct {
 		enable: bool,
 	},
 	PC:              Address,
+	SP:              Address,
 	pre_instruction: inst.Mnemonic,
 	registers:       struct {
 		AF: struct #raw_union {
@@ -63,7 +64,6 @@ Cpu :: struct {
 				H: u8,
 			},
 		},
-		SP: Address,
 	},
 }
 
@@ -253,7 +253,7 @@ main :: proc() {
 
 	{ 	// skip Bootloader
 		cpu.PC = 0x0100
-		cpu.registers.SP = 0xfffe
+		cpu.SP = 0xfffe
 		cpu.registers.AF.single.F = {.Z, .H, .C}
 		cpu.registers.AF.single.A = 0x01
 	}

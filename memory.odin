@@ -441,8 +441,8 @@ oam: [0x100]u8
 wram: [0x2000]u8
 hram: [0x80]u8
 
-get_reg16 :: proc(r8: R16) -> (reg: ^u16) {
-	switch r8 {
+get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
+	switch r16 {
 	case .AF:
 		return &cpu.registers.AF.full
 	case .BC:
@@ -452,13 +452,13 @@ get_reg16 :: proc(r8: R16) -> (reg: ^u16) {
 	case .HL:
 		return &cpu.registers.HL.full
 	case .SP:
-		return transmute(^u16)&cpu.registers.SP
+		return transmute(^u16)&cpu.SP
 	}
 
 	panic("reg16 not defind")
 }
 
-get_reg8 :: proc(r8: R8) -> (reg: ^u8) {
+get_reg8 :: proc($r8: R8) -> (reg: ^u8) {
 	switch r8 {
 	case .A:
 		return &cpu.registers.AF.single.A
@@ -542,7 +542,7 @@ rotate_right :: proc(val: ^u8) -> (lsb: u8) {
 	return
 }
 
-check_condition_code :: proc(condtion: ConditionCode) -> bool {
+check_condition_code :: proc($condtion: ConditionCode) -> bool {
 	switch condtion {
 	case .NZ:
 		return .Z not_in cpu.registers.AF.single.F

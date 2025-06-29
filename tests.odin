@@ -96,7 +96,6 @@ test_bit_set :: proc(t: ^testing.T) {
 	set ~= {.C}
 
 	testing.expect(t, set == {.A, .B, .C})
-	// cpu.registers.AF.single.F += {.Z} if true else -{.Z}
 
 
 	set ~= {.C}
