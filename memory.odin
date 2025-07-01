@@ -442,7 +442,11 @@ wram: [0x2000]u8
 hram: [0x80]u8
 
 get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
+	when r16 == .NONE {
+		#panic("get r16 is none")
+	}
 	switch r16 {
+	case .NONE:
 	case .AF:
 		return &cpu.registers.AF.full
 	case .BC:
@@ -459,7 +463,11 @@ get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
 }
 
 get_reg8 :: proc($r8: R8) -> (reg: ^u8) {
+	when r8 == .NONE {
+		#panic("get r8 is none")
+	}
 	switch r8 {
+	case .NONE:
 	case .A:
 		return &cpu.registers.AF.single.A
 	case .B:
@@ -510,17 +518,17 @@ is_half_carried_sub16 :: proc(a, b: u16) -> bool {
 	return (((a & 0xFFF) - (b & 0xFFF)) & 0x1000) == 0x1000
 }
 
-rotate_left_includes_carry :: proc(val: ^u8, flags: ^bit_set[Flags;u8]) {
+rotate_left_includes_carry :: proc(val: ^u8) {
+	flags := &cpu.registers.AF.single.F
 	msb := val^ >> 7
-	c := u8(.C in flags)
+	c := u8(.C in flags^)
 	val^ = val^ << 1 + c
 	flags^ = flags^ + {.C} if msb == 1 else flags^ - {.C}
 }
 
-rotate_left :: proc(val: ^u8) -> (msb: u8) {
-	msb = val^ >> 7
+rotate_left :: proc(val: ^u8) {
+	msb := val^ >> 7
 	val^ = val^ << 1 + msb
-	return
 }
 
 rotate_right_includes_carry :: proc(val: ^u8, flags: ^bit_set[Flags;u8]) {
@@ -533,16 +541,26 @@ rotate_right_includes_carry :: proc(val: ^u8, flags: ^bit_set[Flags;u8]) {
 	flags^ = flags^ + {.C} if lsb == 1 else flags^ - {.C}
 }
 
-rotate_right :: proc(val: ^u8) -> (lsb: u8) {
-	lsb = val^ & 1
+
+rotate_right :: proc(val: ^u8) {
+	lsb := val^ & 1
 	val^ = val^ >> 1
 	if lsb == 1 {
 		val^ += 0x80
 	}
-	return
 }
 
-check_condition_code :: proc($condtion: ConditionCode) -> bool {
+
+toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
+	if cond {
+		cpu.registers.AF.single.F += {flag}
+	} else {
+		cpu.registers.AF.single.F -= {flag}
+	}
+}
+
+
+is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 	switch condtion {
 	case .NZ:
 		return .Z not_in cpu.registers.AF.single.F
@@ -552,7 +570,7 @@ check_condition_code :: proc($condtion: ConditionCode) -> bool {
 		return .C not_in cpu.registers.AF.single.F
 	case .C:
 		return .C in cpu.registers.AF.single.F
-	case nil:
+	case nil, .None:
 		return true
 	}
 	panic("Condition error")

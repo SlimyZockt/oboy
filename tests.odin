@@ -10,10 +10,9 @@ import "core:testing"
 test_full_rotate_left_carry :: proc(t: ^testing.T) {
 
 	reg: u8 = 0xF0
-	flags: bit_set[Flags;u8]
 
 	for i in 0 ..= 8 {
-		rotate_left_includes_carry(&reg, &flags)
+		rotate_left_includes_carry(&reg)
 	}
 
 	testing.expect(t, reg == 0xF0)
@@ -46,10 +45,9 @@ test_full_rotate_right :: proc(t: ^testing.T) {
 @(test)
 test_half_rotate_left_carry :: proc(t: ^testing.T) {
 	reg: u8 = 0xF0
-	flags: bit_set[Flags;u8]
 
 	for i in 0 ..= 4 {
-		rotate_left_includes_carry(&reg, &flags)
+		rotate_left_includes_carry(&reg)
 	}
 
 	testing.expect(t, reg == 0x0F)
