@@ -2,7 +2,6 @@
 package main
 
 import "core:log"
-import "core:math/bits"
 import "core:testing"
 
 
@@ -11,7 +10,7 @@ test_full_rotate_left_carry :: proc(t: ^testing.T) {
 
 	reg: u8 = 0xF0
 
-	for i in 0 ..= 8 {
+	for _ in 0 ..= 8 {
 		rotate_left_includes_carry(&reg)
 	}
 
@@ -23,7 +22,7 @@ test_full_rotate_left :: proc(t: ^testing.T) {
 
 	reg: u8 = 0xF0
 
-	for i in 0 ..< 8 {
+	for _ in 0 ..< 8 {
 		rotate_left(&reg)
 	}
 
@@ -35,7 +34,7 @@ test_full_rotate_right :: proc(t: ^testing.T) {
 
 	reg: u8 = 0xF0
 
-	for i in 0 ..< 8 {
+	for _ in 0 ..< 8 {
 		rotate_right(&reg)
 	}
 
@@ -46,7 +45,7 @@ test_full_rotate_right :: proc(t: ^testing.T) {
 test_half_rotate_left_carry :: proc(t: ^testing.T) {
 	reg: u8 = 0xF0
 
-	for i in 0 ..= 4 {
+	for _ in 0 ..= 4 {
 		rotate_left_includes_carry(&reg)
 	}
 
@@ -56,10 +55,9 @@ test_half_rotate_left_carry :: proc(t: ^testing.T) {
 @(test)
 test_full_rotate_right_carry :: proc(t: ^testing.T) {
 	reg: u8 = 0xF0
-	flags: bit_set[Flags;u8]
 
-	for i in 0 ..= 8 {
-		rotate_right_includes_carry(&reg, &flags)
+	for _ in 0 ..= 8 {
+		rotate_right_includes_carry(&reg)
 	}
 
 	testing.expect(t, reg == 0xF0)
@@ -68,10 +66,9 @@ test_full_rotate_right_carry :: proc(t: ^testing.T) {
 @(test)
 test_half_rotate_right_carry :: proc(t: ^testing.T) {
 	reg: u8 = 0xF0
-	flags: bit_set[Flags;u8]
 
-	for i in 0 ..= 4 {
-		rotate_right_includes_carry(&reg, &flags)
+	for _ in 0 ..= 4 {
+		rotate_right_includes_carry(&reg)
 	}
 
 	testing.expect(t, reg == 7)
@@ -83,7 +80,7 @@ test_u16_to_i8 :: proc(t: ^testing.T) {
 	i: i16 = 0xFF
 
 	log.infof("%b", u)
-	log.info(u16(i - i16(transmute(i8)u)))
+	log.info(u16(i - i16(u)))
 }
 
 

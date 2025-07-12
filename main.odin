@@ -4,14 +4,10 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:c"
 import "core:c/libc"
-import "core:encoding/json"
 import "core:fmt"
 import "core:log"
-import "core:math/bits"
-import "core:mem"
 import "core:os"
 import "core:slice"
-import "core:strconv"
 import "core:strings"
 import "vendor:raylib"
 
@@ -25,17 +21,24 @@ Register :: struct #raw_union {
 	},
 }
 
-Interrupt :: enum u8 {}
+Interrupt :: enum u8 {
+	Joypad,
+	Serial,
+	Timer,
+	LCD,
+	VBlank,
+}
 
 Cpu :: struct {
-	interrupt:       struct {
+	interrupt:  struct {
 		flags:  bit_set[Interrupt;u8],
-		enable: bool,
+		enable: bit_set[Interrupt;u8],
+		master: bool,
 	},
-	PC:              Address,
-	SP:              Address,
-	pre_instruction: inst.Mnemonic,
-	registers:       struct {
+	PC:         Address,
+	SP:         Address,
+	pre_opcode: u8,
+	registers:  struct {
 		AF: struct #raw_union {
 			full:   u16,
 			single: struct {
@@ -123,6 +126,7 @@ g_ctx: runtime.Context
 
 cpu: Cpu
 gpu: Gpu
+excuted_instructions: [dynamic]u8
 
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
@@ -201,55 +205,61 @@ assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code
 main :: proc() {
 	g_ctx = context
 
-	context.logger = log.create_console_logger(.Debug)
-	context.assertion_failure_proc = assertion_failure_proc
+	{ 	// setup logging
 
-	raylib.SetTraceLogLevel(.ALL)
-	raylib.SetTraceLogCallback(raylib_trace_log)
-	libc.signal(libc.SIGSEGV, sig_handler)
-	libc.signal(libc.SIGILL, sig_handler)
+		context.logger = log.create_console_logger(.Debug)
+		context.assertion_failure_proc = assertion_failure_proc
 
-	when ODIN_DEBUG {
-		track: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
+		raylib.SetTraceLogLevel(.ALL)
+		raylib.SetTraceLogCallback(raylib_trace_log)
+		libc.signal(libc.SIGSEGV, sig_handler)
+		libc.signal(libc.SIGILL, sig_handler)
 
-		defer {
-			if len(track.allocation_map) > 0 {
-				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-				for _, entry in track.allocation_map {
-					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+		when ODIN_DEBUG {
+			track: mem.Tracking_Allocator
+			mem.tracking_allocator_init(&track, context.allocator)
+			context.allocator = mem.tracking_allocator(&track)
+
+			defer {
+				if len(track.allocation_map) > 0 {
+					fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+					for _, entry in track.allocation_map {
+						fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+					}
 				}
-			}
-			if len(track.bad_free_array) > 0 {
-				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-				for entry in track.bad_free_array {
-					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+				if len(track.bad_free_array) > 0 {
+					fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+					for entry in track.bad_free_array {
+						fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+					}
 				}
+				mem.tracking_allocator_destroy(&track)
 			}
-			mem.tracking_allocator_destroy(&track)
 		}
+
 	}
 
-	if len(os.args) != 2 {
-		log.errorf("Wrong number of args (%d)", len(os.args))
-		log.error(os.args)
-		return
-	}
+	{ 	// Setup emulator
+		if len(os.args) != 2 {
+			log.errorf("Wrong number of args (%d)", len(os.args))
+			log.error(os.args)
+			return
+		}
 
-	rom_path := os.args[1]
-	cartridge, ok := os.read_entire_file_from_filename(rom_path)
-	if !ok {
-		log.error("Can not read file")
-		return
-	}
-	defer delete(cartridge)
+		rom_path := os.args[1]
+		cartridge, ok := os.read_entire_file_from_filename(rom_path)
+		if !ok {
+			log.error("Can not read file")
+			return
+		}
+		defer delete(cartridge)
 
-	for i in 0 ..< 0x8000 {
-		rom[i] = cartridge[i]
+		for i in 0 ..< 0x8000 {
+			rom[i] = cartridge[i]
+		}
+		assert(slice.equal(rom[:0x8000], cartridge[:0x8000]))
+
 	}
-	assert(slice.equal(rom[:0x8000], cartridge[:0x8000]))
-	cartridge_size := len(cartridge)
 
 	{ 	// skip Bootloader
 		cpu.PC = 0x0100
@@ -258,52 +268,47 @@ main :: proc() {
 		cpu.registers.AF.single.A = 0x01
 	}
 
+	excuted_instructions = make_dynamic_array_len([dynamic]u8, 0xFFFF)
+
 	raylib.InitWindow(160, 144, "oboy")
+	defer raylib.CloseWindow()
 	raylib.SetTargetFPS(30)
 
 	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{255, 0, 0, 255})
 
 	raylib.UnloadImage(emtpy_image)
 
-	nop_count := 0
-	for !raylib.WindowShouldClose() {
+	loop: for !raylib.WindowShouldClose() {
 		opcode := rom[cpu.PC]
 		instruction := inst.UnprefixedInstructions[opcode]
-		if instruction.mnemonic == .PREFIX {
-			cpu.PC += 1
-			opcode = rom[cpu.PC]
-			instruction = inst.PrefixedInstructions[0xFE + opcode]
+
+		// di
+		if cpu.pre_opcode == 0xF3 {
+			cpu.interrupt.master = false
+			// ei
+		} else if cpu.pre_opcode == 0xFB {
+			cpu.interrupt.master = true
 		}
 
-		when ODIN_DEBUG {
-			//Generates data for the trace log
-			trace_data := new(Instruction_TD)
-			trace_data.pc = cpu.PC
-			trace_data.name = instruction.mnemonic
-			operand_loc := 0
-			append(&trace_log.data, trace_data)
-
-
-			if instruction.mnemonic != .NOP {
-				nop_count = 0
-			} else {
-				nop_count += 1
+		#partial switch instruction.mnemonic {
+		case .PREFIX:
+			{
+				cpu.PC += 1
+				opcode = rom[cpu.PC]
+				instruction = inst.PrefixedInstructions[opcode]
+				execute_prefixed_instruction(opcode)
 			}
-
-			if nop_count == 10 {
-				panic("too many nop")
-			}
-		}
-
-		if instruction.mnemonic == .HALT {
-			break
+		case .HALT:
+			break loop
+		case:
+			execute_instruction(opcode)
 		}
 
 		// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
-
-		//Do the importend thing 
-		execute_instruction(opcode)
 		// handle_graphics(&cpu)
+
+		cpu.pre_opcode = opcode
+		cpu.PC += Address(instruction.bytes)
 
 		//Cleanup
 		raylib.BeginDrawing()
@@ -312,7 +317,6 @@ main :: proc() {
 	}
 
 
-	raylib.CloseWindow()
 	when ODIN_DEBUG {
 		print_trace_log()
 	}

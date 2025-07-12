@@ -2,8 +2,6 @@ package main
 
 import "core:log"
 import "core:math/rand"
-import "core:slice"
-import inst "instructions"
 
 Address :: distinct u16
 
@@ -531,7 +529,8 @@ rotate_left :: proc(val: ^u8) {
 	val^ = val^ << 1 + msb
 }
 
-rotate_right_includes_carry :: proc(val: ^u8, flags: ^bit_set[Flags;u8]) {
+rotate_right_includes_carry :: proc(val: ^u8) {
+	flags := &cpu.registers.AF.single.F
 	lsb := val^ & 1
 	c := u8(.C in flags)
 	val^ = val^ >> 1
@@ -570,7 +569,7 @@ is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 		return .C not_in cpu.registers.AF.single.F
 	case .C:
 		return .C in cpu.registers.AF.single.F
-	case nil, .None:
+	case nil, .NONE:
 		return true
 	}
 	panic("Condition error")
@@ -654,7 +653,7 @@ write_u8 :: proc(address: Address, value: u8) {
 	case address == HR_Address[Hardware_Registers.SCX]:
 		gpu.scroll_x = value
 	case address == HR_Address[Hardware_Registers.IE]:
-		cpu.interrupt.enable = bool(value)
+		cpu.interrupt.enable = transmute(bit_set[Interrupt;u8])value
 	case address == HR_Address[Hardware_Registers.IF]:
 		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
 	case address == HR_Address[Hardware_Registers.DMA]:
