@@ -104,3 +104,38 @@ TestE :: enum {
 	C,
 }
 
+t_err :: proc() -> (ok: bool) {
+	return
+}
+
+@(test)
+test_t :: proc(t: ^testing.T) {
+	log.infof("out: %v", t_err())
+	testing.expect(t, t_err() == true)
+
+}
+
+@(test)
+test_switch_scope :: proc(t: ^testing.T) {
+	e: TestE = .A
+
+	// num := {
+	// 	return 0
+	// }
+
+	num := 0
+	// {
+	// 	num := 0
+	// }
+
+	log.info(num)
+	switch e {
+	case .A:
+		@(static) i := 0
+	case .B:
+		i := 0
+		log.info(i)
+	case .C:
+	}
+}
+

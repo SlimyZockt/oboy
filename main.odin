@@ -6,6 +6,7 @@ import "core:c"
 import "core:c/libc"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -30,14 +31,15 @@ Interrupt :: enum u8 {
 }
 
 Cpu :: struct {
+	PC:         Address,
+	SP:         Address,
+	pre_opcode: u8,
+	ticks:      u64,
 	interrupt:  struct {
 		flags:  bit_set[Interrupt;u8],
 		enable: bit_set[Interrupt;u8],
 		master: bool,
 	},
-	PC:         Address,
-	SP:         Address,
-	pre_opcode: u8,
 	registers:  struct {
 		AF: struct #raw_union {
 			full:   u16,
@@ -70,12 +72,33 @@ Cpu :: struct {
 	},
 }
 
+LCD_Control :: enum u8 {
+	LCD_PPU_Enable,
+	Window_Area_Offset,
+	Window_Enable,
+	Tiledata_Offset,
+	Background_Area_Offset,
+	OBJ_Size,
+	OBJ_Enable,
+	Background_Window_Enable,
+}
+
+
+Gpu_Mode :: enum u8 {
+	HBlank = 0,
+	VBlank = 1,
+	OAM    = 2,
+	Draw   = 3,
+}
+
 Gpu :: struct {
-	controll: u8,
-	scroll_x: u8,
-	scroll_y: u8,
-	scanline: u8,
-	tick:     u8,
+	mode:      Gpu_Mode,
+	controll:  bit_set[LCD_Control;u8],
+	scroll_x:  u8,
+	scroll_y:  u8,
+	scanline:  u8,
+	dots:      u16,
+	pre_ticks: u64,
 }
 
 Data_ID :: u8
@@ -202,6 +225,21 @@ assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code
 	os.exit(1)
 }
 
+
+Error :: struct {
+	location: runtime.Source_Code_Location,
+	massage:  string,
+}
+
+Result :: union($T: typeid) #no_nil {
+	Error,
+	T,
+}
+
+new_error :: proc(massage: string, location := #caller_location) -> Error {
+	return Error{location, massage}
+}
+
 main :: proc() {
 	g_ctx = context
 
@@ -246,6 +284,7 @@ main :: proc() {
 			return
 		}
 
+
 		rom_path := os.args[1]
 		cartridge, ok := os.read_entire_file_from_filename(rom_path)
 		if !ok {
@@ -279,36 +318,9 @@ main :: proc() {
 	raylib.UnloadImage(emtpy_image)
 
 	loop: for !raylib.WindowShouldClose() {
-		opcode := rom[cpu.PC]
-		instruction := inst.UnprefixedInstructions[opcode]
 
-		// di
-		if cpu.pre_opcode == 0xF3 {
-			cpu.interrupt.master = false
-			// ei
-		} else if cpu.pre_opcode == 0xFB {
-			cpu.interrupt.master = true
-		}
-
-		#partial switch instruction.mnemonic {
-		case .PREFIX:
-			{
-				cpu.PC += 1
-				opcode = rom[cpu.PC]
-				instruction = inst.PrefixedInstructions[opcode]
-				execute_prefixed_instruction(opcode)
-			}
-		case .HALT:
-			break loop
-		case:
-			execute_instruction(opcode)
-		}
-
-		// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
-		// handle_graphics(&cpu)
-
-		cpu.pre_opcode = opcode
-		cpu.PC += Address(instruction.bytes)
+		step_cpu()
+		step_gpu()
 
 		//Cleanup
 		raylib.BeginDrawing()
@@ -321,6 +333,7 @@ main :: proc() {
 		print_trace_log()
 	}
 }
+
 
 delete_trace_log :: proc(trace_log: [dynamic]^Instruction_TD) {
 	for t in trace_log {

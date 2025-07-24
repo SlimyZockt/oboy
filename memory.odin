@@ -433,11 +433,11 @@ io_reset := [0x100]u8 {
 
 rom: [0x8000]u8
 extern_ram: [0x2000]u8
-io: [0x100]u8
 vram: [0x2000]u8
-oam: [0x100]u8
+oam: [0x00A0]u8
 wram: [0x2000]u8
 hram: [0x80]u8
+io: [0x100]u8
 
 get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
 	when r16 == .NONE {
@@ -603,7 +603,7 @@ read_u8 :: proc(address: Address) -> u8 {
 		// Should return a div timer, but a random number works just as well for Tetris
 		return u8(rand.int31_max(0xFF))
 	case address == HR_Address[Hardware_Registers.LCDC]:
-		return gpu.controll
+		return transmute(u8)gpu.controll
 	case address == HR_Address[Hardware_Registers.SCY]:
 		return gpu.scroll_y
 	case address == HR_Address[Hardware_Registers.SCX]:
@@ -613,7 +613,7 @@ read_u8 :: proc(address: Address) -> u8 {
 		log.warn("JOYP not implemnted yet")
 		return 0
 	case address == HR_Address[Hardware_Registers.IF]:
-		return u8(cpu.interrupt.enable)
+		return transmute(u8)cpu.interrupt.enable
 	case address == HR_Address[Hardware_Registers.IE]:
 		return transmute(u8)cpu.interrupt.flags
 	case is_address_in_mm(address, MM.Hram):
@@ -647,7 +647,7 @@ write_u8 :: proc(address: Address, value: u8) {
 		// Should return a div timer, but a random number works just as well for Tetris
 		u8(rand.int31_max(0xFF))
 	case address == HR_Address[Hardware_Registers.LCDC]:
-		gpu.controll = value
+		gpu.controll = transmute(bit_set[LCD_Control;u8])value
 	case address == HR_Address[Hardware_Registers.SCY]:
 		gpu.scroll_y = value
 	case address == HR_Address[Hardware_Registers.SCX]:
@@ -660,15 +660,15 @@ write_u8 :: proc(address: Address, value: u8) {
 		copy(MM_Start[MM.OAM], Address(value << 8), 160)
 	case address == HR_Address[Hardware_Registers.BGP]:
 		for &color, i in bg_palette {
-			color = palette[(value >> (u8(i) * 2)) & 3]
+			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
 	case address == HR_Address[Hardware_Registers.OBP0]:
 		for &color, i in sprite_palettes[0] {
-			color = palette[(value >> (u8(i) * 2)) & 3]
+			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
 	case address == HR_Address[Hardware_Registers.OBP1]:
 		for &color, i in sprite_palettes[1] {
-			color = palette[(value >> (u8(i) * 2)) & 3]
+			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
 	case is_address_in_mm(address, MM.IO):
 		hram[address - MM_End[MM.IO]] = value

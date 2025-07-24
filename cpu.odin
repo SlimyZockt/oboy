@@ -1,6 +1,7 @@
 package main
 
 import "base:intrinsics"
+import inst "instructions"
 
 ConditionCode :: enum u8 {
 	NONE,
@@ -51,6 +52,43 @@ Intstruction_Proc :: union {
 	proc($mode: U8_ARG_MODE, $r8: R8),
 	proc($cc: ConditionCode, $mode: U8_ARG_MODE, $r8: R8),
 	proc($r8: R8),
+}
+
+step_cpu :: proc() {
+	opcode := rom[cpu.PC]
+	instruction := inst.UnprefixedInstructions[opcode]
+
+	// di
+	if cpu.pre_opcode == 0xF3 {
+		cpu.interrupt.master = false
+		// ei
+	} else if cpu.pre_opcode == 0xFB {
+		cpu.interrupt.master = true
+	}
+
+	#partial switch instruction.mnemonic {
+	case .PREFIX:
+		{
+			cpu.PC += 1
+			opcode = rom[cpu.PC]
+			instruction = inst.PrefixedInstructions[opcode]
+			execute_prefixed_instruction(opcode)
+		}
+	case .HALT:
+		return
+	case:
+		execute_instruction(opcode)
+	}
+
+	// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
+	// handle_graphics(&cpu)
+
+	cpu.pre_opcode = opcode
+	cpu.PC += Address(instruction.bytes)
+	for cycle in instruction.cycles {
+		cpu.ticks += u64(cycle)
+	}
+
 }
 
 
