@@ -13,13 +13,13 @@ DEFAULT_PALETTE := Palette{{255, 255, 255}, {192, 192, 192}, {96, 96, 96}, {0, 0
 bg_palette := DEFAULT_PALETTE
 sprite_palettes := [2]Palette{DEFAULT_PALETTE, DEFAULT_PALETTE}
 
-framebuffer :: [SCREEN_HIGHT * SCREEN_WIIDTH]Color
+framebuffer: [SCREEN_HIGHT * SCREEN_WIIDTH]Color
 
 // dots
 ObjectFlags :: enum u8 {
-	CGB_pallet,
+	CGB_Pallet,
 	Blank,
-	DMG_pallet,
+	DMG_Pallet,
 	X_Filp,
 	Y_Filp,
 	Priority,
@@ -117,14 +117,22 @@ draw_scanline :: proc(line: u8) -> (ok: bool) {
 
 			if oam[id] != line do continue
 
-			objects[j].pos.y = oam[id]
-			objects[j].pos.x = oam[id + 1]
-			objects[j].tile_index = oam[id + 2]
-			objects[j].flags = transmute(bit_set[ObjectFlags;u8])oam[id]
+			object := &objects[j]
+
+			object.pos.y = oam[id]
+			object.pos.x = oam[id + 1]
+			object.tile_index = oam[id + 2]
+			object.flags = transmute(bit_set[ObjectFlags;u8])oam[id]
 
 			tile := get_tile(objects[j].tile_index, .UNSIGNED)
 
-			line_data := tile_to_line(tile, line, Palette{})
+			palette := .DMG_Pallet in object.flags ? sprite_palettes[1] : sprite_palettes[0]
+
+			line_data := tile_to_line(tile, line, palette)
+
+			for color, x in line_data {
+				framebuffer[object.pos.y * SCREEN_WIIDTH + (object.pos.x + u8(x))] = color
+			}
 
 			if j == 9 do break
 			j += 1
