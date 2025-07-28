@@ -37,7 +37,8 @@ main :: proc() {
 Instruction :: struct {
 	mnemonic:  Mnemonic,
 	bytes:     u8,
-	cycles: []u8,
+	cycles:    []u8,
+	name:    string,
 }
 `,
 	)
@@ -86,12 +87,20 @@ gen_instruction_data :: proc(f: os.Handle, root: json.Object) {
 		fmt.fprint(f, `{`)
 
 		json_cycles := val["cycles"].(json.Array)
-		for cycle, i in json_cycles {
+		for cycle, _ in json_cycles {
 			cycle := cycle.(json.Float)
 			fmt.fprintf(f, ` %v, `, cycle)
 		}
+		fmt.fprint(f, `},`)
+		fmt.fprintf(f, `"%s`, val["mnemonic"].(json.String))
 
-		fmt.fprint(f, `}`)
+		for operand in val["operands"].(json.Array) {
+			val := operand.(json.Object)
+			fmt.fprintf(f, ` %s`, val["name"].(json.String))
+		}
+
+		fmt.fprint(f, `"`)
+
 		fmt.fprintln(f, `},`)
 	}
 

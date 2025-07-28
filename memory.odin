@@ -5,142 +5,18 @@ import "core:math/rand"
 
 Address :: distinct u16
 
-MM :: enum u16 {
-	Rom,
-	Switch_Rom,
-	Vram,
-	External_Ram,
-	WRam,
-	Echo_Ram,
-	OAM,
-	Forbidden,
-	IO,
-	Hram,
-	Interupt,
-}
-
-Hardware_Registers :: enum u64 {
-	JOYP,
-	SB,
-	SC,
-	DIV,
-	TIMA,
-	TMA,
-	TAC,
-	IF,
-	NR10,
-	NR11,
-	NR12,
-	NR13,
-	NR14,
-	NR21,
-	NR22,
-	NR23,
-	NR24,
-	NR30,
-	NR31,
-	NR32,
-	NR33,
-	NR34,
-	NR41,
-	NR42,
-	NR43,
-	NR44,
-	NR50,
-	NR51,
-	NR52,
-	Wave_Ram,
-	LCDC,
-	STAT,
-	SCY,
-	SCX,
-	LY,
-	LYC,
-	DMA,
-	BGP,
-	OBP0,
-	OBP1,
-	WY,
-	WX,
-	KEY1,
-	VBK,
-	HDMA1,
-	HDMA2,
-	HDMA3,
-	HDMA4,
-	HDMA5,
-	RP,
-	BCPS,
-	BCPD,
-	OCPS,
-	OCPD,
-	OPRI,
-	SVBK,
-	PCM12,
-	PCM34,
-	IE,
-}
-
-HR_Address :: [?]Address {
-	0xFF00,
-	0xFF01,
-	0xFF02,
-	0xFF04,
-	0xFF05,
-	0xFF06,
-	0xFF07,
-	0xFF0F,
-	0xFF10,
-	0xFF11,
-	0xFF12,
-	0xFF13,
-	0xFF14,
-	0xFF16,
-	0xFF17,
-	0xFF18,
-	0xFF19,
-	0xFF1A,
-	0xFF1B,
-	0xFF1C,
-	0xFF1D,
-	0xFF1E,
-	0xFF20,
-	0xFF21,
-	0xFF22,
-	0xFF23,
-	0xFF24,
-	0xFF25,
-	0xFF26,
-	0xFF30,
-	0xFF40,
-	0xFF41,
-	0xFF42,
-	0xFF43,
-	0xFF44,
-	0xFF45,
-	0xFF46,
-	0xFF47,
-	0xFF48,
-	0xFF49,
-	0xFF4A,
-	0xFF4B,
-	0xFF4D,
-	0xFF4F,
-	0xFF51,
-	0xFF52,
-	0xFF53,
-	0xFF54,
-	0xFF55,
-	0xFF56,
-	0xFF68,
-	0xFF69,
-	0xFF6A,
-	0xFF6B,
-	0xFF6C,
-	0xFF70,
-	0xFF76,
-	0xFF77,
-	0xFFFF,
+MM :: enum u8 {
+	Rom          = 0,
+	Switch_Rom   = 1,
+	Vram         = 2,
+	External_Ram = 3,
+	Wram         = 4,
+	Echo_Ram     = 5,
+	OAM          = 6,
+	Forbidden    = 7,
+	IO           = 8,
+	Hram         = 9,
+	Interupt     = 10,
 }
 
 MM_End :: [?]Address {
@@ -578,7 +454,7 @@ is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 
 @(private)
 is_address_in_mm :: #force_inline proc(address: Address, $range: MM) -> bool {
-	return MM_Start[range] <= address && address >= MM_End[range]
+	return MM_Start[range] <= address && address <= MM_End[range]
 }
 
 copy :: proc(dest: Address, source: Address, len: u64) {
@@ -588,41 +464,43 @@ copy :: proc(dest: Address, source: Address, len: u64) {
 }
 
 read_u8 :: proc(address: Address) -> u8 {
+	log.infof("Reading Adress: 0x%04X", address)
 	switch {
-	case is_address_in_mm(address, MM.Rom):
+	case is_address_in_mm(address, MM.Rom) || is_address_in_mm(address, MM.Switch_Rom):
 		return rom[address]
 	case is_address_in_mm(address, MM.Vram):
-		return vram[address - MM_End[MM.Vram]]
+		return vram[address - MM_Start[MM.Vram]]
 	case is_address_in_mm(address, MM.External_Ram):
-		return extern_ram[address - MM_End[MM.External_Ram]]
-	case is_address_in_mm(address, MM.WRam):
-		return wram[address - MM_End[MM.WRam]]
+		return extern_ram[address - MM_Start[MM.External_Ram]]
+	case is_address_in_mm(address, MM.Wram):
+		return wram[address - MM_Start[MM.Wram]]
 	case is_address_in_mm(address, MM.OAM):
-		return oam[address - MM_End[MM.OAM]]
-	case address == HR_Address[Hardware_Registers.DIV]:
+		return oam[address - MM_Start[MM.OAM]]
+	case address == 0xFF04:
+		// DIV
 		// Should return a div timer, but a random number works just as well for Tetris
 		return u8(rand.int31_max(0xFF))
-	case address == HR_Address[Hardware_Registers.LCDC]:
+	case address == 0xFF40:
 		return transmute(u8)gpu.controll
-	case address == HR_Address[Hardware_Registers.SCY]:
+	case address == 0xFF42:
 		return gpu.scroll_y
-	case address == HR_Address[Hardware_Registers.SCX]:
+	case address == 0xFF43:
 		return gpu.scroll_x
-	case address == HR_Address[Hardware_Registers.JOYP]:
+	case address == 0xFF00:
 		// assert(false, "todo")
 		log.warn("JOYP not implemnted yet")
 		return 0
-	case address == HR_Address[Hardware_Registers.IF]:
-		return transmute(u8)cpu.interrupt.enable
-	case address == HR_Address[Hardware_Registers.IE]:
+	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
+	case address == 0xFFFF:
+		return transmute(u8)cpu.interrupt.enable
 	case is_address_in_mm(address, MM.Hram):
-		return hram[address - MM_End[MM.Hram]]
+		return hram[address - MM_Start[MM.Hram]]
 	case is_address_in_mm(address, MM.IO):
-		return oam[address - MM_End[MM.IO]]
+		return oam[address - MM_Start[MM.IO]]
+	case:
+		log.panicf("Reading Adress: 0x%04X is invalid;", address)
 	}
-
-	log.panicf("Adress: %v is invalid;", address)
 }
 
 
@@ -633,48 +511,46 @@ read_u16 :: proc(address: Address) -> u16 {
 
 write_u8 :: proc(address: Address, value: u8) {
 	switch {
-	case is_address_in_mm(address, MM.Rom):
-		rom[address] = value
+	case is_address_in_mm(address, MM.External_Ram):
+		extern_ram[address - MM_Start[MM.External_Ram]] = value
 	case is_address_in_mm(address, MM.Vram):
-		vram[address - MM_End[MM.Vram]] = value
-	case is_address_in_mm(address, MM.WRam):
-		wram[address - MM_End[MM.WRam]] = value
+		vram[address - MM_Start[MM.Vram]] = value
+	case is_address_in_mm(address, MM.Wram):
+		wram[address - MM_Start[MM.Wram]] = value
 	case is_address_in_mm(address, MM.OAM):
-		oam[address - MM_End[MM.OAM]] = value
+		oam[address - MM_Start[MM.OAM]] = value
 	case is_address_in_mm(address, MM.Hram):
-		hram[address - MM_End[MM.Hram]] = value
-	case address == HR_Address[Hardware_Registers.DIV]:
-		// Should return a div timer, but a random number works just as well for Tetris
-		u8(rand.int31_max(0xFF))
-	case address == HR_Address[Hardware_Registers.LCDC]:
+		hram[address - MM_Start[MM.Hram]] = value
+	case address == 0xFF40:
 		gpu.controll = transmute(bit_set[LCD_Control;u8])value
-	case address == HR_Address[Hardware_Registers.SCY]:
+	case address == 0xFF42:
 		gpu.scroll_y = value
-	case address == HR_Address[Hardware_Registers.SCX]:
+	case address == 0xFF43:
 		gpu.scroll_x = value
-	case address == HR_Address[Hardware_Registers.IE]:
-		cpu.interrupt.enable = transmute(bit_set[Interrupt;u8])value
-	case address == HR_Address[Hardware_Registers.IF]:
-		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
-	case address == HR_Address[Hardware_Registers.DMA]:
+	case address == 0xFF46:
 		copy(MM_Start[MM.OAM], Address(value << 8), 160)
-	case address == HR_Address[Hardware_Registers.BGP]:
+	case address == 0xFF47:
 		for &color, i in bg_palette {
 			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
-	case address == HR_Address[Hardware_Registers.OBP0]:
+	case address == 0xFF48:
 		for &color, i in sprite_palettes[0] {
 			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
-	case address == HR_Address[Hardware_Registers.OBP1]:
+	case address == 0xFF49:
 		for &color, i in sprite_palettes[1] {
 			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
 	case is_address_in_mm(address, MM.IO):
-		hram[address - MM_End[MM.IO]] = value
+		io[address - MM_Start[MM.IO]] = value
+	case address == 0xFFFF:
+		cpu.interrupt.enable = transmute(bit_set[Interrupt;u8])value
+	case address == 0xFF0F:
+		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
+	case:
+		log.panicf("Writing Adress: 0x%04X is invalid", address)
 	}
 
-	log.panicf("Adress: %v is invalid;", address)
 }
 
 write_u16 :: proc(address: Address, value: u16) {

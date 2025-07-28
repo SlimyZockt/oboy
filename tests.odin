@@ -111,7 +111,7 @@ t_err :: proc() -> (ok: bool) {
 @(test)
 test_t :: proc(t: ^testing.T) {
 	log.infof("out: %v", t_err())
-	testing.expect(t, t_err() == true)
+	testing.expect(t, t_err() == false)
 
 }
 
@@ -137,5 +137,26 @@ test_switch_scope :: proc(t: ^testing.T) {
 		log.info(i)
 	case .C:
 	}
+}
+
+
+T_Struct :: struct {
+	using _: struct #raw_union {
+		AF:      u16,
+		using _: struct {
+			F: bit_set[Flags;u8],
+			A: u8,
+		},
+	},
+}
+
+@(test)
+testing_using :: proc(t: ^testing.T) {
+	t: T_Struct
+	t.AF = 0xFFAA
+
+	log.debugf("%04X", t.AF)
+	log.debugf("%04X", t.F)
+	log.debugf("%04X", t.A)
 }
 

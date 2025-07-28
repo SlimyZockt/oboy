@@ -1,6 +1,7 @@
 package main
 
 import "base:intrinsics"
+import "core:log"
 import inst "instructions"
 
 ConditionCode :: enum u8 {
@@ -47,11 +48,64 @@ VEC :: enum {
 }
 
 
-Intstruction_Proc :: union {
-	proc(),
-	proc($mode: U8_ARG_MODE, $r8: R8),
-	proc($cc: ConditionCode, $mode: U8_ARG_MODE, $r8: R8),
-	proc($r8: R8),
+load_boot_rom :: proc(cpu: ^Cpu) {
+	cpu.registers.A = 0x01
+	cpu.registers.F = {.Z, .H, .C}
+
+	cpu.registers.B = 0x00
+	cpu.registers.C = 0x13
+
+	cpu.registers.D = 0x00
+	cpu.registers.E = 0xD8
+
+
+	cpu.registers.H = 0x01
+	cpu.registers.L = 0x4D
+
+	cpu.PC = 0x1000
+	cpu.SP = 0xFFFE
+
+	cpu.interrupt.master = true
+	cpu.interrupt.enable = {}
+	cpu.interrupt.flags = {}
+
+	io = io_reset
+
+	for &pixel in framebuffer {
+		pixel = Color{255, 255, 255}
+	}
+
+	write_u8(0xFF05, 0)
+	write_u8(0xFF06, 0)
+	write_u8(0xFF07, 0)
+	write_u8(0xFF10, 0x80)
+	write_u8(0xFF11, 0xBF)
+	write_u8(0xFF12, 0xF3)
+	write_u8(0xFF14, 0xBF)
+	write_u8(0xFF16, 0x3F)
+	write_u8(0xFF17, 0x00)
+	write_u8(0xFF19, 0xBF)
+	write_u8(0xFF1A, 0x7A)
+	write_u8(0xFF1B, 0xFF)
+	write_u8(0xFF1C, 0x9F)
+	write_u8(0xFF1E, 0xBF)
+	write_u8(0xFF20, 0xFF)
+	write_u8(0xFF21, 0x00)
+	write_u8(0xFF22, 0x00)
+	write_u8(0xFF23, 0xBF)
+	write_u8(0xFF24, 0x77)
+	write_u8(0xFF25, 0xF3)
+	write_u8(0xFF26, 0xF1)
+	write_u8(0xFF40, 0x91)
+	write_u8(0xFF42, 0x00)
+	write_u8(0xFF43, 0x00)
+	write_u8(0xFF45, 0x00)
+	write_u8(0xFF47, 0xFC)
+	write_u8(0xFF48, 0xFF)
+	write_u8(0xFF49, 0xFF)
+	write_u8(0xFF4A, 0x00)
+	write_u8(0xFF4B, 0x00)
+	write_u8(0xFFFF, 0x00)
 }
 
 step_cpu :: proc() {
@@ -66,22 +120,29 @@ step_cpu :: proc() {
 		cpu.interrupt.master = true
 	}
 
+
+	append(
+		&debug_data,
+		Instruction_Debug_Data {
+			instruction.mnemonic == .PREFIX,
+			opcode,
+			cpu.PC,
+			instruction.mnemonic,
+		},
+	)
+
 	#partial switch instruction.mnemonic {
 	case .PREFIX:
-		{
-			cpu.PC += 1
-			opcode = rom[cpu.PC]
-			instruction = inst.PrefixedInstructions[opcode]
-			execute_prefixed_instruction(opcode)
-		}
+		cpu.PC += 1
+		opcode = rom[cpu.PC]
+		instruction = inst.PrefixedInstructions[opcode]
+		execute_prefixed_instruction(opcode)
 	case .HALT:
 		return
 	case:
 		execute_instruction(opcode)
 	}
 
-	// cpu.cpu.memory[0xFF44] = (cpu.cpu.memory[0xFF44] + 1) % 154
-	// handle_graphics(&cpu)
 
 	cpu.pre_opcode = opcode
 	cpu.PC += Address(instruction.bytes)

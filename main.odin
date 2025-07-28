@@ -10,10 +10,13 @@ import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
-import "vendor:raylib"
+
+import vmem "core:mem/virtual"
+
+import rl "vendor:raylib"
+import stbsp "vendor:stb/sprintf"
 
 import inst "instructions"
-import stbsp "vendor:stb/sprintf"
 
 Register :: struct #raw_union {
 	full:   u16,
@@ -41,30 +44,30 @@ Cpu :: struct {
 		master: bool,
 	},
 	registers:  struct {
-		AF: struct #raw_union {
-			full:   u16,
-			single: struct {
+		using _: struct #raw_union {
+			AF:      u16,
+			using _: struct {
 				F: bit_set[Flags;u8],
 				A: u8,
 			},
 		},
-		BC: struct #raw_union {
-			full:   u16,
-			single: struct {
+		using _: struct #raw_union {
+			BC:      u16,
+			using _: struct {
 				C: u8,
 				B: u8,
 			},
 		},
-		DE: struct #raw_union {
-			full:   u16,
-			single: struct {
+		using _: struct #raw_union {
+			DE:      u16,
+			using _: struct {
 				E: u8,
 				D: u8,
 			},
 		},
-		HL: struct #raw_union {
-			full:   u16,
-			single: struct {
+		using _: struct #raw_union {
+			HL:      u16,
+			using _: struct {
 				L: u8,
 				H: u8,
 			},
@@ -103,15 +106,6 @@ Gpu :: struct {
 
 Data_ID :: u8
 Tile_Map :: [1024 * 2]Data_ID
-Render_Layer :: raylib.Texture2D
-
-Graphics :: struct {
-	render: struct {
-		window:  Render_Layer,
-		bg:      Render_Layer,
-		objects: Render_Layer,
-	},
-}
 
 Gameboy :: struct {
 	cpu: Cpu,
@@ -134,32 +128,30 @@ Operand_TD :: struct {
 		i8,
 	},
 }
-Instruction_TD :: struct {
+Instruction_Debug_Data :: struct {
+	prefixed: bool,
+	opcode:   u8,
 	pc:       Address,
-	name:     inst.Mnemonic,
-	operands: [dynamic]Operand_TD,
+	kind:     inst.Mnemonic,
 }
 
-Trace_Log :: struct {
-	data: [dynamic]^Instruction_TD,
-}
+debug_data: [dynamic]Instruction_Debug_Data
 
-trace_log: Trace_Log
 g_ctx: runtime.Context
 
 cpu: Cpu
 gpu: Gpu
-excuted_instructions: [dynamic]u8
+
+debug_arena: vmem.Arena
 
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
 	print_trace_log()
 
-	free_all()
 	log.panic("main.panic")
 }
 
-raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, args: ^c.va_list) {
+rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c.va_list) {
 	context = g_ctx
 
 	level: log.Level
@@ -203,19 +195,25 @@ raylib_trace_log :: proc "c" (rl_level: raylib.TraceLogLevel, message: cstring, 
 print_trace_log :: proc() {
 	fmt.println("---Start Instrcution Trace Log---")
 
-	for instruction in trace_log.data {
+	for instruction_data in debug_data {
 		out: strings.Builder
 		defer delete(out.buf)
 
-		fmt.sbprintf(&out, "0x%04X %s", instruction.pc, instruction.name)
-		for &operand in instruction.operands {
-			if operand.data == nil do continue
-			fmt.sbprintf(&out, "=%X", operand.data)
-		}
+		lookup :=
+			inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
+
+		instruction := lookup[instruction_data.opcode]
+
+		fmt.sbprintf(
+			&out,
+			"At 0x%04X: [%02X] %s",
+			instruction_data.pc,
+			instruction_data.opcode,
+			instruction.name,
+		)
 		str := strings.to_string(out)
 		fmt.println(str)
 	}
-	delete_trace_log(trace_log.data)
 	fmt.println("---End Instrcution Trace Log---")
 }
 
@@ -243,39 +241,43 @@ new_error :: proc(massage: string, location := #caller_location) -> Error {
 main :: proc() {
 	g_ctx = context
 
-	{ 	// setup logging
+	context.logger = log.create_console_logger(.Debug)
+	context.assertion_failure_proc = assertion_failure_proc
 
-		context.logger = log.create_console_logger(.Debug)
-		context.assertion_failure_proc = assertion_failure_proc
+	rl.SetTraceLogLevel(.ALL)
+	rl.SetTraceLogCallback(rl_trace_log)
+	libc.signal(libc.SIGSEGV, sig_handler)
+	libc.signal(libc.SIGILL, sig_handler)
 
-		raylib.SetTraceLogLevel(.ALL)
-		raylib.SetTraceLogCallback(raylib_trace_log)
-		libc.signal(libc.SIGSEGV, sig_handler)
-		libc.signal(libc.SIGILL, sig_handler)
+	arena_err := vmem.arena_init_growing(&debug_arena)
+	ensure(arena_err == nil)
+	context.temp_allocator = vmem.arena_allocator(&debug_arena)
 
-		when ODIN_DEBUG {
-			track: mem.Tracking_Allocator
-			mem.tracking_allocator_init(&track, context.allocator)
-			context.allocator = mem.tracking_allocator(&track)
+	debug_data = make([dynamic]Instruction_Debug_Data, context.temp_allocator)
+	vmem.arena_destroy(&debug_arena)
 
-			defer {
-				if len(track.allocation_map) > 0 {
-					fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-					for _, entry in track.allocation_map {
-						fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-					}
+	when ODIN_DEBUG {
+		track: mem.Tracking_Allocator
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+
+		defer {
+			if len(track.allocation_map) > 0 {
+				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+				for _, entry in track.allocation_map {
+					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
 				}
-				if len(track.bad_free_array) > 0 {
-					fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-					for entry in track.bad_free_array {
-						fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
-					}
-				}
-				mem.tracking_allocator_destroy(&track)
 			}
+			if len(track.bad_free_array) > 0 {
+				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+				for entry in track.bad_free_array {
+					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+				}
+			}
+			mem.tracking_allocator_destroy(&track)
 		}
-
 	}
+
 
 	{ 	// Setup emulator
 		if len(os.args) != 2 {
@@ -300,46 +302,45 @@ main :: proc() {
 
 	}
 
-	{ 	// skip Bootloader
-		cpu.PC = 0x0100
-		cpu.SP = 0xfffe
-		cpu.registers.AF.single.F = {.Z, .H, .C}
-		cpu.registers.AF.single.A = 0x01
-	}
 
-	excuted_instructions = make_dynamic_array_len([dynamic]u8, 0xFFFF)
+	rl.InitWindow(SCREEN_WIDTH, SCREEN_HIGHT, "oboy")
+	defer rl.CloseWindow()
 
-	raylib.InitWindow(160, 144, "oboy")
-	defer raylib.CloseWindow()
-	raylib.SetTargetFPS(30)
+	// img := rl.Image{&framebuffer, SCREEN_WIDTH, SCREEN_HIGHT, 1, .UNCOMPRESSED_R8G8B8}
 
-	emtpy_image := raylib.GenImageColor(8, 8, raylib.Color{255, 0, 0, 255})
+	texture := rl.LoadRenderTexture(SCREEN_WIDTH, SCREEN_HIGHT)
+	defer rl.UnloadRenderTexture(texture)
 
-	raylib.UnloadImage(emtpy_image)
+	load_boot_rom(&cpu)
 
-	loop: for !raylib.WindowShouldClose() {
-
+	rl.SetTargetFPS(30)
+	for !rl.WindowShouldClose() {
 		step_cpu()
 		step_gpu()
 
-		//Cleanup
-		raylib.BeginDrawing()
-		raylib.ClearBackground(raylib.WHITE)
-		raylib.EndDrawing()
+		interrupt_step(&texture.texture)
+		// rl.BeginTextureMode(texture)
+		// {
+		// 	rl.UpdateTexture(texture.texture, &framebuffer)
+		// }
+		// rl.EndTextureMode()
+		rl.BeginDrawing()
+
+		//
+		rl.DrawTexture(texture.texture, 0, 0, rl.WHITE)
+
+		// rl.ClearBackground(rl.WHITE)
+		rl.EndDrawing()
 	}
 
 
-	when ODIN_DEBUG {
-		print_trace_log()
-	}
+	// when ODIN_DEBUG {
+	// 	print_trace_log()
+	// }
 }
 
 
-delete_trace_log :: proc(trace_log: [dynamic]^Instruction_TD) {
-	for t in trace_log {
-		free(t)
-		delete(t.operands)
-	}
+delete_trace_log :: proc(trace_log: [dynamic]Instruction_Debug_Data) {
 	delete(trace_log)
 }
 
