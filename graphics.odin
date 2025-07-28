@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 
 Color :: distinct [3]u8
 Palette :: distinct [4]Color
@@ -36,14 +37,19 @@ Object :: struct {
 }
 
 step_gpu :: proc() {
-	gpu.dots += u16(cpu.ticks - gpu.pre_ticks)
 
-	gpu.pre_ticks = cpu.ticks
+	@(static) pre_ticks: u64 = 0
+
+	gpu.dots += u64(i64(cpu.ticks) - i64(pre_ticks))
+
+	pre_ticks = cpu.ticks
+
+	// log.warn(gpu.dots)
 
 	switch gpu.mode {
 	case .HBlank:
-		if 204 < gpu.dots do break
-
+		if gpu.dots < 204 do break
+		log.info(gpu.mode)
 		// HBlank
 		gpu.scanline += 1
 
@@ -59,7 +65,8 @@ step_gpu :: proc() {
 
 		gpu.dots -= 204
 	case .VBlank:
-		if 456 < gpu.dots do break
+		if gpu.dots < 456 do break
+		log.info(gpu.mode)
 
 		gpu.scanline += 1
 
@@ -71,11 +78,13 @@ step_gpu :: proc() {
 		gpu.dots -= 456
 
 	case .OAM:
-		if 80 < gpu.dots do break
+		if gpu.dots < 80 do break
+		log.warn(80 < gpu.dots)
 		gpu.mode = .Draw
 		gpu.dots -= 80
 	case .Draw:
-		if 172 < gpu.dots do break
+		if gpu.dots < 172 do break
+		log.warn(gpu.mode)
 
 		gpu.mode = .HBlank
 		draw_scanline(gpu.scanline)

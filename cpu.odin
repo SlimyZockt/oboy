@@ -75,6 +75,8 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 		pixel = Color{255, 255, 255}
 	}
 
+	gpu.dots = 0
+
 	write_u8(0xFF05, 0)
 	write_u8(0xFF06, 0)
 	write_u8(0xFF07, 0)
@@ -146,14 +148,27 @@ step_cpu :: proc() {
 	#partial switch instruction.mnemonic {
 	case .CALL, .JR, .JP, .RET, .RETI, .RST:
 		break
+	case .ILLEGAL_D3,
+	     .ILLEGAL_DD,
+	     .ILLEGAL_FD,
+	     .ILLEGAL_E3,
+	     .ILLEGAL_E4,
+	     .ILLEGAL_F4,
+	     .ILLEGAL_FC,
+	     .ILLEGAL_EC,
+	     .ILLEGAL_ED,
+	     .ILLEGAL_DB,
+	     .ILLEGAL_EB:
+		log.panic("Illagel instruction:", opcode)
 	case:
 		cpu.PC += Address(instruction.bytes)
 	}
 
-
 	cpu.pre_opcode = opcode
+
 	for cycle in instruction.cycles {
-		cpu.ticks += u64(cycle >> 2)
+
+		cpu.ticks += u64(cycle)
 	}
 
 }
@@ -1294,7 +1309,10 @@ bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8) where (0 <= bit && bit <= 
 }
 
 call_n16 :: proc($cc: ConditionCode) {
-	if !is_condition_valid(cc) do return
+	if !is_condition_valid(cc) {
+		cpu.PC += 1
+		return
+	}
 	n := read_u16(cpu.PC + 1)
 
 	cpu.SP -= 2
@@ -1402,7 +1420,10 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 		HL,
 		N16,
 	}) {
-	if !is_condition_valid(cc) do return
+	if !is_condition_valid(cc) {
+		cpu.PC += 1
+		return
+	}
 
 	when mode == .HL {
 		cpu.PC = Address(cpu.registers.HL)
@@ -1415,8 +1436,12 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 }
 
 jr :: proc($cc: ConditionCode) {
-	if !is_condition_valid(cc) do return
-	cpu.PC = Address(i16(cpu.PC) + i16(read_u8(cpu.SP)))
+	if !is_condition_valid(cc) {
+		log.debug("cc not")
+		cpu.PC += 1
+		return
+	}
+	cpu.PC = Address(i16(cpu.PC) + i16(read_u8(cpu.PC + 1)))
 }
 
 ld_r8_r8 :: proc($r8_0: R8, $r8_1: R8) {
@@ -1552,7 +1577,10 @@ res_HL :: proc($bit: u8) where 0 <= bit && bit <= 7 {
 }
 
 ret :: proc($cc: ConditionCode) {
-	if !is_condition_valid(cc) do return
+	if !is_condition_valid(cc) {
+		cpu.PC += 1
+		return
+	}
 	cpu.PC = Address(read_u16(cpu.SP))
 	cpu.SP += 2
 }

@@ -95,13 +95,12 @@ Gpu_Mode :: enum u8 {
 }
 
 Gpu :: struct {
-	mode:      Gpu_Mode,
-	controll:  bit_set[LCD_Control;u8],
-	scroll_x:  u8,
-	scroll_y:  u8,
-	scanline:  u8,
-	dots:      u16,
-	pre_ticks: u64,
+	mode:     Gpu_Mode,
+	controll: bit_set[LCD_Control;u8],
+	scroll_x: u8,
+	scroll_y: u8,
+	scanline: u8,
+	dots:     u64,
 }
 
 Data_ID :: u8
@@ -306,20 +305,19 @@ main :: proc() {
 	rl.InitWindow(SCREEN_WIDTH, SCREEN_HIGHT, "oboy")
 	defer rl.CloseWindow()
 
-	// img := rl.Image{&framebuffer, SCREEN_WIDTH, SCREEN_HIGHT, 1, .UNCOMPRESSED_R8G8B8}
-
 	texture := rl.LoadRenderTexture(SCREEN_WIDTH, SCREEN_HIGHT)
 	defer rl.UnloadRenderTexture(texture)
 
 	load_boot_rom(&cpu)
 
-	rl.SetTargetFPS(30)
+	rl.SetTargetFPS(60)
 	for !rl.WindowShouldClose() {
 		step_cpu()
 		step_gpu()
-
 		interrupt_step(&texture.texture)
-		rl.UpdateTexture(texture.texture, &framebuffer)
+
+
+		// rl.UpdateTexture(texture.texture, &framebuffer)
 		rl.BeginDrawing()
 
 		rl.DrawTexture(texture.texture, 0, 0, rl.WHITE)
@@ -329,9 +327,9 @@ main :: proc() {
 	}
 
 
-	// when ODIN_DEBUG {
-	// 	print_trace_log()
-	// }
+	when ODIN_DEBUG {
+		print_trace_log()
+	}
 }
 
 
