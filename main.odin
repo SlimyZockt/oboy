@@ -319,14 +319,9 @@ main :: proc() {
 		step_gpu()
 
 		interrupt_step(&texture.texture)
-		// rl.BeginTextureMode(texture)
-		// {
-		// 	rl.UpdateTexture(texture.texture, &framebuffer)
-		// }
-		// rl.EndTextureMode()
+		rl.UpdateTexture(texture.texture, &framebuffer)
 		rl.BeginDrawing()
 
-		//
 		rl.DrawTexture(texture.texture, 0, 0, rl.WHITE)
 
 		// rl.ClearBackground(rl.WHITE)

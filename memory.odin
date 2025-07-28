@@ -322,13 +322,13 @@ get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
 	switch r16 {
 	case .NONE:
 	case .AF:
-		return &cpu.registers.AF.full
+		return &cpu.registers.AF
 	case .BC:
-		return &cpu.registers.BC.full
+		return &cpu.registers.BC
 	case .DE:
-		return &cpu.registers.DE.full
+		return &cpu.registers.DE
 	case .HL:
-		return &cpu.registers.HL.full
+		return &cpu.registers.HL
 	case .SP:
 		return transmute(^u16)&cpu.SP
 	}
@@ -343,19 +343,19 @@ get_reg8 :: proc($r8: R8) -> (reg: ^u8) {
 	switch r8 {
 	case .NONE:
 	case .A:
-		return &cpu.registers.AF.single.A
+		return &cpu.registers.A
 	case .B:
-		return &cpu.registers.BC.single.B
+		return &cpu.registers.B
 	case .C:
-		return &cpu.registers.BC.single.C
+		return &cpu.registers.C
 	case .D:
-		return &cpu.registers.DE.single.D
+		return &cpu.registers.D
 	case .E:
-		return &cpu.registers.DE.single.E
+		return &cpu.registers.E
 	case .H:
-		return &cpu.registers.HL.single.H
+		return &cpu.registers.H
 	case .L:
-		return &cpu.registers.HL.single.L
+		return &cpu.registers.L
 	}
 
 	panic("reg8 not defind")
@@ -393,7 +393,7 @@ is_half_carried_sub16 :: proc(a, b: u16) -> bool {
 }
 
 rotate_left_includes_carry :: proc(val: ^u8) {
-	flags := &cpu.registers.AF.single.F
+	flags := &cpu.registers.F
 	msb := val^ >> 7
 	c := u8(.C in flags^)
 	val^ = val^ << 1 + c
@@ -406,7 +406,7 @@ rotate_left :: proc(val: ^u8) {
 }
 
 rotate_right_includes_carry :: proc(val: ^u8) {
-	flags := &cpu.registers.AF.single.F
+	flags := &cpu.registers.F
 	lsb := val^ & 1
 	c := u8(.C in flags)
 	val^ = val^ >> 1
@@ -428,9 +428,9 @@ rotate_right :: proc(val: ^u8) {
 
 toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
 	if cond {
-		cpu.registers.AF.single.F += {flag}
+		cpu.registers.F += {flag}
 	} else {
-		cpu.registers.AF.single.F -= {flag}
+		cpu.registers.F -= {flag}
 	}
 }
 
@@ -438,13 +438,13 @@ toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
 is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 	switch condtion {
 	case .NZ:
-		return .Z not_in cpu.registers.AF.single.F
+		return .Z not_in cpu.registers.F
 	case .Z:
-		return .Z in cpu.registers.AF.single.F
+		return .Z in cpu.registers.F
 	case .NC:
-		return .C not_in cpu.registers.AF.single.F
+		return .C not_in cpu.registers.F
 	case .C:
-		return .C in cpu.registers.AF.single.F
+		return .C in cpu.registers.F
 	case nil, .NONE:
 		return true
 	}
@@ -505,7 +505,7 @@ read_u8 :: proc(address: Address) -> u8 {
 
 
 read_u16 :: proc(address: Address) -> u16 {
-	return u16(read_u8(address)) | u16(read_u8(address + 1) << 8)
+	return u16(read_u8(address)) | (u16(read_u8(address + 1)) << 8)
 }
 
 

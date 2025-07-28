@@ -62,7 +62,7 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 	cpu.registers.H = 0x01
 	cpu.registers.L = 0x4D
 
-	cpu.PC = 0x1000
+	cpu.PC = 0x0100
 	cpu.SP = 0xFFFE
 
 	cpu.interrupt.master = true
@@ -143,11 +143,17 @@ step_cpu :: proc() {
 		execute_instruction(opcode)
 	}
 
+	#partial switch instruction.mnemonic {
+	case .CALL, .JR, .JP, .RET, .RETI, .RST:
+		break
+	case:
+		cpu.PC += Address(instruction.bytes)
+	}
+
 
 	cpu.pre_opcode = opcode
-	cpu.PC += Address(instruction.bytes)
 	for cycle in instruction.cycles {
-		cpu.ticks += u64(cycle)
+		cpu.ticks += u64(cycle >> 2)
 	}
 
 }
@@ -545,9 +551,9 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xc1:
 		pop_r16(.BC)
 	case 0xc2:
-		jp(.NZ, .N8, .NONE)
+		jp(.NZ, .N16)
 	case 0xc3:
-		jp(.NONE, .N8, .NONE)
+		jp(.NONE, .N16)
 	case 0xc4:
 		call_n16(.NZ)
 	case 0xc5:
@@ -561,7 +567,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xc9:
 		ret(.NONE)
 	case 0xca:
-		jp(.Z, .N8, .NONE)
+		jp(.Z, .N16)
 	case 0xcb:
 		panic("prefixed instruction called")
 	case 0xcc:
@@ -577,7 +583,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xd1:
 		pop_r16(.DE)
 	case 0xd2:
-		jp(.NC, .N8, .NONE)
+		jp(.NC, .N16)
 	case 0xd3:
 	case 0xd4:
 		call_n16(.NC)
@@ -592,7 +598,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xd9:
 		reti()
 	case 0xda:
-		jp(.C, .N8, .NONE)
+		jp(.C, .N16)
 	case 0xdb:
 	case 0xdc:
 		call_n16(.C)
@@ -618,7 +624,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xe8:
 		add16_SP_e8()
 	case 0xe9:
-		jp(.NONE, .HL, .NONE)
+		jp(.NONE, .HL)
 	case 0xea:
 		ld_n16_A()
 	case 0xeb:
@@ -1182,26 +1188,43 @@ U8_ARG_MODE :: enum u8 {
 	N8,
 }
 
+
+U16_ARG_MODE :: enum u8 {
+	R16,
+	HL,
+	N16,
+}
+
 get_argument_u8 :: proc($mode: U8_ARG_MODE, $r8: R8) -> u8 {
 	when mode == .HL && r8 == .NONE {
-		mem := read_u8(Address(cpu.registers.HL.full))
+		return read_u8(Address(cpu.registers.HL))
 	} else when mode == .N8 && r8 == .NONE {
-		mem := read_u8(Address(cpu.PC))
+		return read_u8(cpu.PC + 1)
 	} else when mode == .R8 && r8 != .NONE {
-		mem := get_reg8(r8)^
+		return get_reg8(r8)^
 	} else {
-
 		#panic("invalid argument")
 	}
+}
 
-	return mem
+
+get_argument_u16 :: proc($mode: U16_ARG_MODE, $r16: R16) -> u16 {
+	when mode == .HL && r16 == .NONE {
+		return cpu.registers.HL
+	} else when mode == .N16 && r16 == .NONE {
+		return read_u16(cpu.PC + 1)
+	} else when mode == .R16 && r16 != .NONE {
+		return get_reg16(r16)^
+	} else {
+		#panic("invalid argument")
+	}
 }
 
 adc_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
-	reg_a := &cpu.registers.AF.single.A
-	flags := &cpu.registers.AF.single.F
+	reg_a := &cpu.registers.A
+	flags := &cpu.registers.F
 	carry := u8(.C in flags)
 	res := u16(reg_a^) + u16(mem) + u16(carry)
 	reg_a^ = u8(res)
@@ -1210,38 +1233,38 @@ adc_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFF, .C)
 	toggle_flag(half_carry, .H)
-	cpu.registers.AF.single.F -= {.N}
+	cpu.registers.F -= {.N}
 
 }
 
 add8_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
-	reg_a := &cpu.registers.AF.single.A
+	reg_a := &cpu.registers.A
 	res := u16(reg_a^) + u16(mem)
 	reg_a^ = u8(res)
 
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFF, .C)
 	toggle_flag(is_half_carried_add(reg_a^, mem), .H)
-	cpu.registers.AF.single.F -= {.N}
+	cpu.registers.F -= {.N}
 }
 
 add16_HL :: proc($r16: R16) {
 	reg := get_reg16(r16)^
 
-	reg_hl := &cpu.registers.HL.full
+	reg_hl := &cpu.registers.HL
 	res := u32(reg_hl^) + u32(reg)
 	reg_hl^ = u16(res)
 
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFFFF, .C)
 	toggle_flag(is_half_carried_add(reg_hl^, reg), .H)
-	cpu.registers.AF.single.F -= {.N}
+	cpu.registers.F -= {.N}
 }
 
 add16_SP_e8 :: proc() {
-	e8 := cast(i8)read_u8(cpu.PC)
+	e8 := cast(i8)read_u8(cpu.PC + 1)
 
 	sp := &cpu.SP
 	res := i32(sp^) + i32(e8)
@@ -1249,16 +1272,16 @@ add16_SP_e8 :: proc() {
 
 	toggle_flag(res > 0xFF, .C)
 	toggle_flag(is_half_carried_add(u8(sp^), u8(e8)), .H)
-	cpu.registers.AF.single.F -= {.N, .Z}
+	cpu.registers.F -= {.N, .Z}
 }
 
 
 and_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
-	cpu.registers.AF.single.A &= get_argument_u8(mode, r8)
+	cpu.registers.A &= get_argument_u8(mode, r8)
 
-	cpu.registers.AF.single.F -= {.N, .C}
-	cpu.registers.AF.single.F += {.H}
-	toggle_flag(cpu.registers.AF.single.A == 0, .Z)
+	cpu.registers.F -= {.N, .C}
+	cpu.registers.F += {.H}
+	toggle_flag(cpu.registers.A == 0, .Z)
 }
 
 
@@ -1266,13 +1289,13 @@ bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8) where (0 <= bit && bit <= 
 	mem := get_argument_u8(mode, r8)
 
 	toggle_flag((mem << bit) & 0x1 == 0, .Z)
-	cpu.registers.AF.single.F -= {.N}
-	cpu.registers.AF.single.F += {.H}
+	cpu.registers.F -= {.N}
+	cpu.registers.F += {.H}
 }
 
 call_n16 :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) do return
-	n := read_u16(cpu.PC)
+	n := read_u16(cpu.PC + 1)
 
 	cpu.SP -= 2
 	write_u16(cpu.SP, n)
@@ -1281,30 +1304,30 @@ call_n16 :: proc($cc: ConditionCode) {
 }
 
 ccf :: proc() {
-	cpu.registers.AF.single.F -= {.N, .H}
-	cpu.registers.AF.single.F ~= {.C}
+	cpu.registers.F -= {.N, .H}
+	cpu.registers.F ~= {.C}
 }
 
 cp_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
-	diff := cpu.registers.AF.single.A - mem
+	diff := cpu.registers.A - mem
 	toggle_flag(diff == 0, .Z)
-	toggle_flag(is_half_carried_sub(cpu.registers.AF.single.A, mem), .Z)
-	toggle_flag(mem > cpu.registers.AF.single.A, .Z)
-	cpu.registers.AF.single.F += {.N}
+	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .Z)
+	toggle_flag(mem > cpu.registers.A, .Z)
+	cpu.registers.F += {.N}
 }
 
 cpl :: proc() {
-	cpu.registers.AF.single.A = ~cpu.registers.AF.single.A
-	cpu.registers.AF.single.F += {.N, .H}
+	cpu.registers.A = ~cpu.registers.A
+	cpu.registers.F += {.N, .H}
 }
 
 
 daa :: proc() {
 	adjustment: u8 = 0
-	flags := &cpu.registers.AF.single.F
-	a := &cpu.registers.AF.single.A
+	flags := &cpu.registers.F
+	a := &cpu.registers.A
 
 	if .H in flags^ || (.N not_in flags^ && (a^ & 0xf) > 9) {
 		adjustment |= 0x6
@@ -1326,18 +1349,18 @@ dec8 :: proc($r8: R8) {
 
 	toggle_flag(target^ == 0, .Z)
 	toggle_flag(is_half_carried_add(target^, 1), .H)
-	cpu.registers.AF.single.F += {.N}
+	cpu.registers.F += {.N}
 }
 
 dec_hl :: proc() {
-	target := read_u8(Address(cpu.registers.HL.full))
+	target := read_u8(Address(cpu.registers.HL))
 	target -= 1
 
-	write_u8(Address(cpu.registers.HL.full), target)
+	write_u8(Address(cpu.registers.HL), target)
 
 	toggle_flag(target == 0, .Z)
 	toggle_flag(is_half_carried_add(target, 1), .H)
-	cpu.registers.AF.single.F += {.N}
+	cpu.registers.F += {.N}
 }
 
 dec16 :: proc($r16: R16) {
@@ -1356,18 +1379,18 @@ inc8 :: proc($r8: R8) {
 
 	toggle_flag(target^ == 0, .Z)
 	toggle_flag(is_half_carried_add(target^, 1), .H)
-	cpu.registers.AF.single.F -= {.N}
+	cpu.registers.F -= {.N}
 }
 
 inc_hl :: proc() {
-	target := read_u8(Address(cpu.registers.HL.full))
+	target := read_u8(Address(cpu.registers.HL))
 	target += 1
 
-	write_u8(Address(cpu.registers.HL.full), target)
+	write_u8(Address(cpu.registers.HL), target)
 
 	toggle_flag(target == 0, .Z)
 	toggle_flag(is_half_carried_add(target, 1), .H)
-	cpu.registers.AF.single.F -= {.N}
+	cpu.registers.F -= {.N}
 }
 
 inc16 :: proc($r16: R16) {
@@ -1375,9 +1398,20 @@ inc16 :: proc($r16: R16) {
 	target^ += 1
 }
 
-jp :: proc($cc: ConditionCode, $mode: U8_ARG_MODE, $r8: R8) {
+jp :: proc($cc: ConditionCode, $mode: enum u8 {
+		HL,
+		N16,
+	}) {
 	if !is_condition_valid(cc) do return
-	cpu.PC = Address(get_argument_u8(mode, r8))
+
+	when mode == .HL {
+		cpu.PC = Address(cpu.registers.HL)
+	} else when mode == .N16 {
+		cpu.PC = Address(read_u16(cpu.PC + 1))
+	}
+
+
+	log.debugf("%04x", cpu.PC)
 }
 
 jr :: proc($cc: ConditionCode) {
@@ -1390,74 +1424,74 @@ ld_r8_r8 :: proc($r8_0: R8, $r8_1: R8) {
 }
 
 ld_r8_n8 :: proc($r8: R8) {
-	get_reg8(r8)^ = read_u8(cpu.PC)
+	get_reg8(r8)^ = read_u8(cpu.PC + 1)
 }
 
 ld_r16_n16 :: proc($r16: R16) {
-	get_reg16(r16)^ = read_u16(cpu.PC)
+	get_reg16(r16)^ = read_u16(cpu.PC + 1)
 }
 
 ld_HL_r8 :: proc($r8: R8) {
-	write_u8(Address(cpu.registers.HL.full), get_reg8(r8)^)
+	write_u8(Address(cpu.registers.HL), get_reg8(r8)^)
 }
 
 ld_HL_n8 :: proc() {
-	write_u8(Address(cpu.registers.HL.full), read_u8(cpu.PC))
+	write_u8(Address(cpu.registers.HL), read_u8(cpu.PC + 1))
 }
 
 ld_r8_HL :: proc($r8: R8) {
-	get_reg8(r8)^ = read_u8(Address(cpu.registers.HL.full))
+	get_reg8(r8)^ = read_u8(Address(cpu.registers.HL))
 }
 
 ld_r16_A :: proc($r16: R16) {
-	write_u8(Address(get_reg16(r16)^), cpu.registers.AF.single.A)
+	write_u8(Address(get_reg16(r16)^), cpu.registers.A)
 }
 
 ld_n16_A :: proc() {
-	write_u8(Address(read_u16(cpu.PC)), cpu.registers.AF.single.A)
+	write_u8(Address(read_u16(cpu.PC + 1)), cpu.registers.A)
 }
 
 
 ldh_n8_A :: proc() {
-	n := u16(read_u8(cpu.PC))
-	cpu.registers.AF.single.A = read_u8(Address(0xFF00 + n))
+	n := u16(read_u8(cpu.PC + 1))
+	cpu.registers.A = read_u8(Address(0xFF00 + n))
 }
 
 ldh_C_A :: proc() {
-	write_u8(Address(0xFF00 + u16(cpu.registers.BC.single.C)), cpu.registers.AF.single.A)
+	write_u8(Address(0xFF00 + u16(cpu.registers.C)), cpu.registers.A)
 }
 
 ld_A_r16 :: proc($r16: R16) {
-	cpu.registers.AF.single.A = read_u8(Address(get_reg16(r16)^))
+	cpu.registers.A = read_u8(Address(get_reg16(r16)^))
 }
 
 ld_A_n16 :: proc() {
-	cpu.registers.AF.single.A = read_u8(Address(read_u16(cpu.PC)))
+	cpu.registers.A = read_u8(Address(read_u16(cpu.PC + 1)))
 }
 
 ldh_A_n8 :: proc() {
-	n := u16(read_u8(cpu.PC))
-	write_u8(Address(0xFF00 + n), cpu.registers.AF.single.A)
+	n := u16(read_u8(cpu.PC + 1))
+	write_u8(Address(0xFF00 + n), cpu.registers.A)
 }
 
 ldh_A_C :: proc() {
-	cpu.registers.AF.single.A = read_u8(Address(0xFF00 + u16(cpu.registers.BC.single.C)))
+	cpu.registers.A = read_u8(Address(0xFF00 + u16(cpu.registers.C)))
 }
 
 ld_sp_n16 :: proc() {
-	cpu.SP = Address(read_u16(cpu.PC))
+	cpu.SP = Address(read_u16(cpu.PC + 1))
 }
 
 ld_n16_SP :: proc() {
-	write_u16(Address(read_u16(cpu.PC)), u16(cpu.SP))
+	write_u16(Address(read_u16(cpu.PC + 1)), u16(cpu.SP))
 }
 
 ld_MHL_A :: proc($mode: enum {
 		HLI = 1,
 		HLD = -1,
 	}) {
-	write_u8(Address(cpu.registers.HL.full), cpu.registers.AF.single.A)
-	cpu.registers.HL.full += u16(mode)
+	write_u8(Address(cpu.registers.HL), cpu.registers.A)
+	cpu.registers.HL += u16(mode)
 }
 
 
@@ -1465,36 +1499,36 @@ ld_A_MHL :: proc($mode: enum {
 		HLI,
 		HLD,
 	}) {
-	cpu.registers.AF.single.A = read_u8(Address(cpu.registers.HL.full))
+	cpu.registers.A = read_u8(Address(cpu.registers.HL))
 	when mode == .HLI {
-		cpu.registers.HL.full += 1
+		cpu.registers.HL += 1
 	} else {
-		cpu.registers.HL.full -= 1
+		cpu.registers.HL -= 1
 	}
 }
 
 ld_HL_SP_e8 :: proc() {
-	e := i16(read_u8(cpu.PC))
+	e := i16(read_u8(cpu.PC + 1))
 	res := i16(cpu.SP) + e
-	cpu.registers.HL.full = u16(res)
+	cpu.registers.HL = u16(res)
 
-	cpu.registers.AF.single.F -= {.Z, .N}
+	cpu.registers.F -= {.Z, .N}
 
 	toggle_flag(is_half_carried_add(u16(cpu.SP), u16(e)), .H)
 	toggle_flag(res > 0xFF, .C)
 }
 
 ld_SP_HL :: proc() {
-	cpu.SP = Address(cpu.registers.HL.full)
+	cpu.SP = Address(cpu.registers.HL)
 }
 
 // nop :: proc() {}
 
 
 or_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
-	cpu.registers.AF.single.A |= get_argument_u8(mode, r8)
-	cpu.registers.AF.single.F -= {.N, .C, .H}
-	toggle_flag(cpu.registers.AF.single.A == 0, .Z)
+	cpu.registers.A |= get_argument_u8(mode, r8)
+	cpu.registers.F -= {.N, .C, .H}
+	toggle_flag(cpu.registers.A == 0, .Z)
 }
 
 pop_r16 :: proc($r16: R16) {
@@ -1514,10 +1548,7 @@ res_r8 :: proc($bit: u8, $r8: R8) where 0 <= bit && bit <= 7 {
 }
 
 res_HL :: proc($bit: u8) where 0 <= bit && bit <= 7 {
-	write_u8(
-		Address(cpu.registers.HL.full),
-		read_u8(Address(cpu.registers.HL.full)) & ~(u8(1) << bit),
-	)
+	write_u8(Address(cpu.registers.HL), read_u8(Address(cpu.registers.HL)) & ~(u8(1) << bit))
 }
 
 ret :: proc($cc: ConditionCode) {
@@ -1537,22 +1568,22 @@ rl_r8 :: proc($r8: R8) {
 	rotate_left_includes_carry(reg)
 
 	toggle_flag(reg^ == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rl_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 	rotate_left_includes_carry(&mem)
-	write_u8(Address(cpu.registers.HL.full), mem)
+	write_u8(Address(cpu.registers.HL), mem)
 
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rla :: proc() {
-	rotate_left_includes_carry(&cpu.registers.AF.single.A)
+	rotate_left_includes_carry(&cpu.registers.A)
 
-	cpu.registers.AF.single.F -= {.N, .H, .Z}
+	cpu.registers.F -= {.N, .H, .Z}
 }
 
 rlc_r8 :: proc($r8: R8) {
@@ -1561,24 +1592,24 @@ rlc_r8 :: proc($r8: R8) {
 
 	toggle_flag(reg^ >> 7 == 1, .C)
 	toggle_flag(reg^ == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rlc_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 	rotate_left(&mem)
-	write_u8(Address(cpu.registers.HL.full), mem)
+	write_u8(Address(cpu.registers.HL), mem)
 
 	toggle_flag(mem >> 7 == 1, .C)
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rlca :: proc() {
-	rotate_left(&cpu.registers.AF.single.A)
+	rotate_left(&cpu.registers.A)
 
-	toggle_flag(cpu.registers.AF.single.A >> 7 == 1, .C)
-	cpu.registers.AF.single.F -= {.N, .H, .Z}
+	toggle_flag(cpu.registers.A >> 7 == 1, .C)
+	cpu.registers.F -= {.N, .H, .Z}
 }
 
 
@@ -1587,23 +1618,23 @@ rr_r8 :: proc($r8: R8) {
 	rotate_right_includes_carry(reg)
 
 	toggle_flag(reg^ == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rr_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 	rotate_left_includes_carry(&mem)
 
-	write_u8(Address(cpu.registers.HL.full), mem)
+	write_u8(Address(cpu.registers.HL), mem)
 
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rra :: proc() {
-	rotate_right_includes_carry(&cpu.registers.AF.single.A)
+	rotate_right_includes_carry(&cpu.registers.A)
 
-	cpu.registers.AF.single.F -= {.N, .H, .Z}
+	cpu.registers.F -= {.N, .H, .Z}
 }
 
 rrc_r8 :: proc($r8: R8) {
@@ -1612,25 +1643,25 @@ rrc_r8 :: proc($r8: R8) {
 
 	toggle_flag(reg^ & 0x1 == 1, .C)
 	toggle_flag(reg^ == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rrc_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 	rotate_right(&mem)
 
-	write_u8(Address(cpu.registers.HL.full), mem)
+	write_u8(Address(cpu.registers.HL), mem)
 
 	toggle_flag(mem & 0x1 == 1, .C)
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 }
 
 rrca :: proc() {
-	rotate_right(&cpu.registers.AF.single.A)
+	rotate_right(&cpu.registers.A)
 
-	toggle_flag(cpu.registers.AF.single.A & 0x1 == 1, .C)
-	cpu.registers.AF.single.F -= {.N, .H, .Z}
+	toggle_flag(cpu.registers.A & 0x1 == 1, .C)
+	cpu.registers.F -= {.N, .H, .Z}
 }
 
 rst :: proc($vec: VEC) {
@@ -1642,22 +1673,22 @@ rst :: proc($vec: VEC) {
 
 sbc_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
-	c := u8(.C in cpu.registers.AF.single.F)
-	res := i16(cpu.registers.AF.single.A - mem - c)
+	c := u8(.C in cpu.registers.F)
+	res := i16(cpu.registers.A - mem - c)
 
-	half_carry := ((cpu.registers.AF.single.A & 0xf) - (mem & 0xf) - (c & 0xf)) & 0x10 == 0x10
+	half_carry := ((cpu.registers.A & 0xf) - (mem & 0xf) - (c & 0xf)) & 0x10 == 0x10
 
-	cpu.registers.AF.single.F += {.N}
+	cpu.registers.F += {.N}
 	toggle_flag(res == 0, .Z)
 	toggle_flag(half_carry, .H)
 	toggle_flag(res < 0, .C)
 
-	cpu.registers.AF.single.A = u8(res)
+	cpu.registers.A = u8(res)
 }
 
 scf :: proc() {
-	cpu.registers.AF.single.F += {.C}
-	cpu.registers.AF.single.F -= {.H, .N}
+	cpu.registers.F += {.C}
+	cpu.registers.F -= {.H, .N}
 }
 
 set_r8 :: proc($bit: u8, $r8: R8) where 0 <= bit && bit <= 7 {
@@ -1665,10 +1696,7 @@ set_r8 :: proc($bit: u8, $r8: R8) where 0 <= bit && bit <= 7 {
 }
 
 set_hl :: proc($bit: u8) where 0 <= bit && bit <= 7 {
-	write_u8(
-		Address(cpu.registers.HL.full),
-		read_u8(Address(cpu.registers.HL.full)) | (u8(1) << bit),
-	)
+	write_u8(Address(cpu.registers.HL), read_u8(Address(cpu.registers.HL)) | (u8(1) << bit))
 }
 
 sla_r8 :: proc($r8: R8) {
@@ -1677,16 +1705,16 @@ sla_r8 :: proc($r8: R8) {
 	toggle_flag(reg^ & 0x80 == 1, .C)
 	reg^ <<= 1
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(reg^ == 0, .Z)
 }
 
 sla_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 
-	write_u8(Address(cpu.registers.HL.full), mem << 1)
+	write_u8(Address(cpu.registers.HL), mem << 1)
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(mem == 0, .Z)
 	toggle_flag(mem & 0x80 == 1, .C)
 }
@@ -1697,16 +1725,16 @@ sra_r8 :: proc($r8: R8) {
 	toggle_flag(reg^ & 0x80 == 1, .C)
 	reg^ = (reg^ & 0x80) | (reg^ >> 1)
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(reg^ == 0, .Z)
 }
 
 sra_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 
-	write_u8(Address(cpu.registers.HL.full), (mem & 0x80) | (mem >> 1))
+	write_u8(Address(cpu.registers.HL), (mem & 0x80) | (mem >> 1))
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(mem == 0, .Z)
 	toggle_flag(mem & 0x80 == 1, .C)
 }
@@ -1718,16 +1746,16 @@ srl_r8 :: proc($r8: R8) {
 	toggle_flag(reg^ & 0x80 == 1, .C)
 	reg^ = (reg^ >> 1)
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(reg^ == 0, .Z)
 }
 
 srl_HL :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 
-	write_u8(Address(cpu.registers.HL.full), (mem >> 1))
+	write_u8(Address(cpu.registers.HL), (mem >> 1))
 
-	cpu.registers.AF.single.F -= {.N, .H}
+	cpu.registers.F -= {.N, .H}
 	toggle_flag(mem & 0x80 == 1, .C)
 	toggle_flag(mem == 0, .Z)
 }
@@ -1740,12 +1768,12 @@ stop :: proc() {
 
 sub :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
-	cpu.registers.AF.single.A -= mem
+	cpu.registers.A -= mem
 
-	toggle_flag(cpu.registers.AF.single.A == 0, .Z)
-	toggle_flag(is_half_carried_sub(cpu.registers.AF.single.A, mem), .H)
-	toggle_flag(mem > cpu.registers.AF.single.A, .C)
-	cpu.registers.AF.single.F += {.N}
+	toggle_flag(cpu.registers.A == 0, .Z)
+	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .H)
+	toggle_flag(mem > cpu.registers.A, .C)
+	cpu.registers.F += {.N}
 }
 
 
@@ -1757,26 +1785,26 @@ swap_r8 :: proc($r8: R8) {
 	reg^ = (lower << 0x4) + upper
 
 	toggle_flag(reg^ == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H, .C}
+	cpu.registers.F -= {.N, .H, .C}
 }
 
 
 swap_hl :: proc() {
-	mem := read_u8(Address(cpu.registers.HL.full))
+	mem := read_u8(Address(cpu.registers.HL))
 
 	lower := mem & 0xF
 	upper := (mem >> 0x4) & 0xF
-	write_u8(Address(cpu.registers.HL.full), (lower << 0x4) + upper)
+	write_u8(Address(cpu.registers.HL), (lower << 0x4) + upper)
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H, .C}
+	cpu.registers.F -= {.N, .H, .C}
 }
 
 
 xor_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
-	cpu.registers.AF.single.A ~= mem
+	cpu.registers.A ~= mem
 	toggle_flag(mem == 0, .Z)
-	cpu.registers.AF.single.F -= {.N, .H, .C}
+	cpu.registers.F -= {.N, .H, .C}
 }
 
