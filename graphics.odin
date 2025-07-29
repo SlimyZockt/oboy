@@ -49,7 +49,7 @@ step_gpu :: proc() {
 	switch gpu.mode {
 	case .HBlank:
 		if gpu.dots < 204 do break
-		log.info(gpu.mode)
+		// log.info(gpu.mode)
 		// HBlank
 		gpu.scanline += 1
 
@@ -66,7 +66,7 @@ step_gpu :: proc() {
 		gpu.dots -= 204
 	case .VBlank:
 		if gpu.dots < 456 do break
-		log.info(gpu.mode)
+		// log.info(gpu.mode)
 
 		gpu.scanline += 1
 
@@ -79,12 +79,12 @@ step_gpu :: proc() {
 
 	case .OAM:
 		if gpu.dots < 80 do break
-		log.warn(80 < gpu.dots)
+		// log.warn(80 < gpu.dots)
 		gpu.mode = .Draw
 		gpu.dots -= 80
 	case .Draw:
 		if gpu.dots < 172 do break
-		log.warn(gpu.mode)
+		// log.warn(gpu.mode)
 
 		gpu.mode = .HBlank
 		draw_scanline(gpu.scanline)

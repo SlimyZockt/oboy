@@ -127,9 +127,16 @@ Operand_TD :: struct {
 		i8,
 	},
 }
+
+Operand :: union {
+	u8,
+	u16,
+}
+
 Instruction_Debug_Data :: struct {
 	prefixed: bool,
 	opcode:   u8,
+	operands: Operand,
 	pc:       Address,
 	kind:     inst.Mnemonic,
 }
@@ -205,9 +212,10 @@ print_trace_log :: proc() {
 
 		fmt.sbprintf(
 			&out,
-			"At 0x%04X: [%02X] %s",
+			"At 0x%04X: [%02X; %04X] %s",
 			instruction_data.pc,
 			instruction_data.opcode,
+			instruction_data.operands,
 			instruction.name,
 		)
 		str := strings.to_string(out)
@@ -310,7 +318,7 @@ main :: proc() {
 
 	load_boot_rom(&cpu)
 
-	rl.SetTargetFPS(60)
+	// rl.SetTargetFPS(60)
 	for !rl.WindowShouldClose() {
 		step_cpu()
 		step_gpu()

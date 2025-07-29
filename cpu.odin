@@ -23,10 +23,6 @@ R8 :: enum u8 {
 	L,
 }
 
-n8 :: distinct u8
-n16 :: distinct u16
-e8 :: distinct i8
-
 R16 :: enum u8 {
 	NONE,
 	AF,
@@ -76,6 +72,7 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 	}
 
 	gpu.dots = 0
+	gpu.mode = .HBlank
 
 	write_u8(0xFF05, 0)
 	write_u8(0xFF06, 0)
@@ -123,11 +120,20 @@ step_cpu :: proc() {
 	}
 
 
+	operand: Operand
+	switch instruction.bytes - 1 {
+	case 1:
+		operand = read_u8(cpu.PC + 1)
+	case 2:
+		operand = read_u16(cpu.PC + 1)
+	}
+
 	append(
 		&debug_data,
 		Instruction_Debug_Data {
 			instruction.mnemonic == .PREFIX,
 			opcode,
+			operand,
 			cpu.PC,
 			instruction.mnemonic,
 		},
@@ -278,7 +284,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0x31:
 		ld_sp_n16()
 	case 0x32:
-		ld_MHL_A(.HLI)
+		ld_MHL_A(.HLD)
 	case 0x33:
 		inc16(.SP)
 	case 0x34:
@@ -1310,7 +1316,7 @@ bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8) where (0 <= bit && bit <= 
 
 call_n16 :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		cpu.PC += 1
+		cpu.PC += 3
 		return
 	}
 	n := read_u16(cpu.PC + 1)
@@ -1421,7 +1427,11 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 		N16,
 	}) {
 	if !is_condition_valid(cc) {
-		cpu.PC += 1
+		when mode == .N16 {
+			cpu.PC += 2
+		} else {
+			cpu.PC += 1
+		}
 		return
 	}
 
@@ -1430,18 +1440,16 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 	} else when mode == .N16 {
 		cpu.PC = Address(read_u16(cpu.PC + 1))
 	}
-
-
-	log.debugf("%04x", cpu.PC)
 }
 
 jr :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		log.debug("cc not")
-		cpu.PC += 1
+		log.warn("cc not")
+		cpu.PC += 2
 		return
 	}
-	cpu.PC = Address(i16(cpu.PC) + i16(read_u8(cpu.PC + 1)))
+
+	cpu.PC = Address(i16(cpu.PC + 2) + i16(i8(read_u8(cpu.PC + 1))))
 }
 
 ld_r8_r8 :: proc($r8_0: R8, $r8_1: R8) {
@@ -1516,7 +1524,7 @@ ld_MHL_A :: proc($mode: enum {
 		HLD = -1,
 	}) {
 	write_u8(Address(cpu.registers.HL), cpu.registers.A)
-	cpu.registers.HL += u16(mode)
+	cpu.registers.HL = cpu.registers.HL + 1 when mode == .HLI else cpu.registers.HL - 1
 }
 
 
@@ -1533,8 +1541,8 @@ ld_A_MHL :: proc($mode: enum {
 }
 
 ld_HL_SP_e8 :: proc() {
-	e := i16(read_u8(cpu.PC + 1))
-	res := i16(cpu.SP) + e
+	e := i8(read_u8(cpu.PC + 1))
+	res := i16(cpu.SP) + i16(e)
 	cpu.registers.HL = u16(res)
 
 	cpu.registers.F -= {.Z, .N}
@@ -1578,7 +1586,7 @@ res_HL :: proc($bit: u8) where 0 <= bit && bit <= 7 {
 
 ret :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		cpu.PC += 1
+		cpu.PC += 3
 		return
 	}
 	cpu.PC = Address(read_u16(cpu.SP))
@@ -1702,7 +1710,7 @@ rst :: proc($vec: VEC) {
 sbc_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 	c := u8(.C in cpu.registers.F)
-	res := i16(cpu.registers.A - mem - c)
+	res := i8(cpu.registers.A - mem - c)
 
 	half_carry := ((cpu.registers.A & 0xf) - (mem & 0xf) - (c & 0xf)) & 0x10 == 0x10
 

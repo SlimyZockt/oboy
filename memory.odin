@@ -464,7 +464,7 @@ copy :: proc(dest: Address, source: Address, len: u64) {
 }
 
 read_u8 :: proc(address: Address) -> u8 {
-	log.infof("Reading Adress: 0x%04X", address)
+	// log.infof("Reading Adress: 0x%04X", address)
 	switch {
 	case is_address_in_mm(address, MM.Rom) || is_address_in_mm(address, MM.Switch_Rom):
 		return rom[address]
@@ -548,7 +548,7 @@ write_u8 :: proc(address: Address, value: u8) {
 	case address == 0xFF0F:
 		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
 	case:
-		log.panicf("Writing Adress: 0x%04X is invalid", address)
+		log.panicf("Writing %v Adress: 0x%04X is invalid", value, address)
 	}
 
 }

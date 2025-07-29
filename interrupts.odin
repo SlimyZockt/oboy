@@ -1,14 +1,16 @@
 package main
 
+import "core:log"
 import rl "vendor:raylib"
 
 interrupt_step :: proc(texture: ^rl.Texture) {
 	if !cpu.interrupt.master do return
 	// && !cpu.interrupt.enable && !cpu.interrupt.flags
-
 	fire := cpu.interrupt.enable & cpu.interrupt.flags
 
+
 	if .VBlank in fire {
+		// log.fatal(fire)
 		cpu.interrupt.flags -= {.VBlank}
 		vblank(texture)
 	}
@@ -33,11 +35,19 @@ interrupt_step :: proc(texture: ^rl.Texture) {
 		joypad()
 	}
 
+	// log.debug(fire)
+
 }
 
 vblank :: proc(texture: ^rl.Texture) {
 	rl.UpdateTexture(texture^, &framebuffer)
 
+	@(static) start_time: f64
+	end_time := rl.GetTime()
+
+	if (start_time - end_time < 1 / 60) {
+		rl.WaitTime(1 / 60)
+	}
 
 	cpu.interrupt.master = false
 	cpu.SP -= 2
@@ -45,6 +55,7 @@ vblank :: proc(texture: ^rl.Texture) {
 	cpu.PC = 0x40
 
 	cpu.ticks += 12
+	start_time = rl.GetTime()
 }
 
 
