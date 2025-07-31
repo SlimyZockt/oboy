@@ -1,3 +1,7 @@
 oboy
 build
 roms
+debug
+bin
+.vscode
+instruction_codegen.bin

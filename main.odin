@@ -5,6 +5,8 @@ import "base:runtime"
 import "core:c"
 import "core:c/libc"
 import "core:fmt"
+import "core:image"
+import "core:image/bmp"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -26,22 +28,23 @@ Register :: struct #raw_union {
 }
 
 Interrupt :: enum u8 {
-	Joypad,
-	Serial,
-	Timer,
-	LCD,
 	VBlank,
+	LCD,
+	Timer,
+	Serial,
+	Joypad,
 }
 
 Cpu :: struct {
 	PC:         Address,
 	SP:         Address,
 	pre_opcode: u8,
+	joypad:     bit_set[Joypad;u8],
 	ticks:      u64,
 	interrupt:  struct {
+		master: bool,
 		flags:  bit_set[Interrupt;u8],
 		enable: bit_set[Interrupt;u8],
-		master: bool,
 	},
 	registers:  struct {
 		using _: struct #raw_union {
@@ -75,15 +78,26 @@ Cpu :: struct {
 	},
 }
 
+Joypad :: enum u8 {
+	A_Right,
+	B_Left,
+	Select_Up,
+	Start_Down,
+	Select_DPad,
+	Select_Buttons,
+	_,
+	_,
+}
+
 LCD_Control :: enum u8 {
-	LCD_PPU_Enable,
-	Window_Area_Offset,
-	Window_Enable,
-	Tiledata_Offset,
-	Background_Area_Offset,
-	OBJ_Size,
-	OBJ_Enable,
 	Background_Window_Enable,
+	OBJ_Enable,
+	OBJ_Size,
+	Background_Area_Offset,
+	Tiledata_Offset,
+	Window_Enable,
+	Window_Area_Offset,
+	LCD_PPU_Enable,
 }
 
 
@@ -118,16 +132,6 @@ Flags :: enum {
 	C,
 }
 
-Operand_TD :: struct {
-	// name: inst.Operand_Name,
-	data: union {
-		u16,
-		u8,
-		[]u8,
-		i8,
-	},
-}
-
 Operand :: union {
 	u8,
 	u16,
@@ -148,11 +152,19 @@ g_ctx: runtime.Context
 cpu: Cpu
 gpu: Gpu
 
+rom: [0x8000]u8
+extern_ram: [0x2000]u8
+vram: [0x2000]u8
+oam: [0x00A0]u8
+wram: [0x2000]u8
+hram: [0x80]u8
+io: [0x100]u8
+
 debug_arena: vmem.Arena
 
 sig_handler :: proc "c" (_: libc.int) {
 	context = g_ctx
-	print_trace_log()
+	print_debug_data()
 
 	log.panic("main.panic")
 }
@@ -198,34 +210,58 @@ rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c
 	)
 }
 
-print_trace_log :: proc() {
-	fmt.println("---Start Instrcution Trace Log---")
 
+print_debug_data :: proc() {
+	DEBUG_FOLDER :: "debug"
+	PRINT_LENGTH :: 30
+
+	trace_log: string = ---
+	trace_log_builder: strings.Builder
+	defer delete(trace_log_builder.buf)
 	for instruction_data in debug_data {
-		out: strings.Builder
-		defer delete(out.buf)
-
 		lookup :=
 			inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
 
 		instruction := lookup[instruction_data.opcode]
 
-		fmt.sbprintf(
-			&out,
+		fmt.sbprintfln(
+			&trace_log_builder,
 			"At 0x%04X: [%02X; %04X] %s",
 			instruction_data.pc,
 			instruction_data.opcode,
 			instruction_data.operands,
 			instruction.name,
 		)
-		str := strings.to_string(out)
-		fmt.println(str)
 	}
-	fmt.println("---End Instrcution Trace Log---")
+
+	trace_log = strings.to_string(trace_log_builder)
+
+	if !os.exists(DEBUG_FOLDER) {
+		os.make_directory(DEBUG_FOLDER)
+	}
+
+	os.write_entire_file(DEBUG_FOLDER + "/instrcution_trace.log", transmute([]u8)trace_log[:])
+	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/hram.bin", hram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/oam.bin", oam[:])
+	os.write_entire_file(DEBUG_FOLDER + "/io.bin", io[:])
+	os.write_entire_file(DEBUG_FOLDER + "/warm.bin", wram[:])
+
+	img, ok := image.pixels_to_image(
+		transmute([]image.RGB_Pixel)framebuffer[:],
+		SCREEN_WIDTH,
+		SCREEN_HIGHT,
+	)
+	ensure(ok)
+
+	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
+	ensure(err == nil)
+
 }
 
 assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-	print_trace_log()
+	print_debug_data()
 	log.fatal(message, location = loc)
 	os.exit(1)
 }
@@ -254,7 +290,7 @@ main :: proc() {
 	rl.SetTraceLogLevel(.ALL)
 	rl.SetTraceLogCallback(rl_trace_log)
 	libc.signal(libc.SIGSEGV, sig_handler)
-	libc.signal(libc.SIGILL, sig_handler)
+	// libc.signal(libc.SIGILL, sig_handler)
 
 	arena_err := vmem.arena_init_growing(&debug_arena)
 	ensure(arena_err == nil)
@@ -313,8 +349,12 @@ main :: proc() {
 	rl.InitWindow(SCREEN_WIDTH, SCREEN_HIGHT, "oboy")
 	defer rl.CloseWindow()
 
-	texture := rl.LoadRenderTexture(SCREEN_WIDTH, SCREEN_HIGHT)
-	defer rl.UnloadRenderTexture(texture)
+	// texture := rl.LoadRenderTexture(SCREEN_WIDTH, SCREEN_HIGHT)
+	// defer rl.UnloadRenderTexture(texture)
+
+	img := rl.Image{&framebuffer, SCREEN_WIDTH, SCREEN_HIGHT, 1, .UNCOMPRESSED_R8G8B8}
+	texture := rl.LoadTextureFromImage(img)
+
 
 	load_boot_rom(&cpu)
 
@@ -322,21 +362,30 @@ main :: proc() {
 	for !rl.WindowShouldClose() {
 		step_cpu()
 		step_gpu()
-		interrupt_step(&texture.texture)
+
+		rl.UpdateTexture(texture, &framebuffer)
 
 
-		// rl.UpdateTexture(texture.texture, &framebuffer)
+		// log.warn(
+		// 	.VBlank in cpu.interrupt.enable,
+		// 	.VBlank in cpu.interrupt.flags,
+		// 	cpu.interrupt.master,
+		// )
+
+		interrupt_step(texture)
+
+		// rl.UpdateTexture(texture, &framebuffer)
 		rl.BeginDrawing()
 
-		rl.DrawTexture(texture.texture, 0, 0, rl.WHITE)
+		rl.DrawTexture(texture, 0, 0, rl.WHITE)
 
-		// rl.ClearBackground(rl.WHITE)
+		rl.ClearBackground(rl.WHITE)
+		rl.DrawFPS(10, 10)
 		rl.EndDrawing()
 	}
 
-
 	when ODIN_DEBUG {
-		print_trace_log()
+		print_debug_data()
 	}
 }
 

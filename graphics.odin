@@ -10,7 +10,7 @@ SCREEN_HIGHT :: 144
 SCANLINES :: 154
 
 @(rodata)
-DEFAULT_PALETTE := Palette{{255, 255, 255}, {192, 192, 192}, {96, 96, 96}, {0, 0, 0}}
+DEFAULT_PALETTE := Palette{{255, 255, 255}, {192, 192, 192}, {96, 96, 96}, {255, 0, 0}}
 
 bg_palette := DEFAULT_PALETTE
 sprite_palettes := [2]Palette{DEFAULT_PALETTE, DEFAULT_PALETTE}
@@ -20,7 +20,9 @@ framebuffer: Framebuffer
 
 // dots
 ObjectFlags :: enum u8 {
-	CGB_Pallet,
+	_,
+	_,
+	_,
 	Blank,
 	DMG_Pallet,
 	X_Filp,
@@ -49,14 +51,16 @@ step_gpu :: proc() {
 	switch gpu.mode {
 	case .HBlank:
 		if gpu.dots < 204 do break
-		// log.info(gpu.mode)
-		// HBlank
 		gpu.scanline += 1
 
 		if gpu.scanline == 143 {
-			if .VBlank in cpu.interrupt.flags {
-				cpu.interrupt.flags -= {.VBlank}
+			if .VBlank in cpu.interrupt.enable {
+				cpu.interrupt.flags += {.VBlank}
+				assert(.VBlank in cpu.interrupt.enable)
+
+				assert(.VBlank in cpu.interrupt.flags)
 			}
+
 
 			gpu.mode = .VBlank
 		} else {
@@ -66,11 +70,10 @@ step_gpu :: proc() {
 		gpu.dots -= 204
 	case .VBlank:
 		if gpu.dots < 456 do break
-		// log.info(gpu.mode)
 
 		gpu.scanline += 1
 
-		if gpu.scanline == 154 {
+		if gpu.scanline >= 153 {
 			gpu.scanline = 0
 			gpu.mode = .OAM
 		}
@@ -79,38 +82,37 @@ step_gpu :: proc() {
 
 	case .OAM:
 		if gpu.dots < 80 do break
-		// log.warn(80 < gpu.dots)
 		gpu.mode = .Draw
 		gpu.dots -= 80
 	case .Draw:
 		if gpu.dots < 172 do break
-		// log.warn(gpu.mode)
 
 		gpu.mode = .HBlank
 		draw_scanline(gpu.scanline)
+
 
 		gpu.dots -= 172
 	}
 }
 
 draw_scanline :: proc(line: u8) -> (ok: bool) {
-	if 0 < line && line < SCANLINES {
+	if 0 < line && line <= SCANLINES {
 		return
 	}
 
-	if .LCD_PPU_Enable in gpu.controll do return
+	// if .LCD_PPU_Enable in gpu.controll do return
 
-	// bottom := u16(gpu.scroll_y + 143) % u16(256)
-	// right := u16(gpu.scroll_x + 159) % u16(256)
 
 	horizontal_offset: Address = (((Address(line) + Address(gpu.scroll_y)) & 255) >> 3) << 5
+	log.debugf("OFFSET: 0x%04X", horizontal_offset)
 
 	is_drawing_allowed := .Background_Window_Enable in gpu.controll
 	if is_drawing_allowed {
 		// win_tile_map_area := 0x9C00 if .Win_Tile_Map_Area in gpu.lcdc else 0x9800
 		bg_offset: Address = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
 		bg_offset += horizontal_offset
-		bg_tile_ids := vram[bg_offset:][:SCREEN_WIDTH]
+		log.debugf("BACKGROUND ADDRESS: 0x%04X", bg_offset)
+		bg_tile_ids := vram[bg_offset:][:SCREEN_WIDTH >> 3]
 
 		for id, x in bg_tile_ids {
 			tile := get_tile(id, .Tiledata_Offset in gpu.controll)
@@ -119,13 +121,17 @@ draw_scanline :: proc(line: u8) -> (ok: bool) {
 
 			insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
 		}
+
+		log.warn(bg_tile_ids)
 	}
 
 	if .OBJ_Enable in gpu.controll {
 		objects: [10]Object
 		j := 0
 		for i in 0 ..< 40 {
-			id := i * 32
+			id := i * 4
+
+			// log.debugf("OAM ADDRESS: 0x%04X", id)
 
 			if oam[id] != line do continue
 
@@ -134,7 +140,7 @@ draw_scanline :: proc(line: u8) -> (ok: bool) {
 			object.pos.y = oam[id]
 			object.pos.x = oam[id + 1]
 			object.tile_index = oam[id + 2]
-			object.flags = transmute(bit_set[ObjectFlags;u8])oam[id]
+			object.flags = transmute(bit_set[ObjectFlags;u8])oam[id + 3]
 
 			tile := get_tile(objects[j].tile_index, false)
 
@@ -145,12 +151,15 @@ draw_scanline :: proc(line: u8) -> (ok: bool) {
 			if j == 9 do break
 			j += 1
 		}
+
 	}
 
-	if is_drawing_allowed && .Window_Enable in gpu.controll {
+	if is_drawing_allowed || .Window_Enable in gpu.controll {
 		win_offset: Address = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
 		win_offset += horizontal_offset
-		win_tile_ids := vram[win_offset:][:SCREEN_WIDTH]
+
+		log.debugf("WINDOW ADDRESS: 0x%04X", win_offset)
+		win_tile_ids := vram[win_offset:][:SCREEN_WIDTH >> 3]
 
 		for id, x in win_tile_ids {
 			tile := get_tile(id, .Tiledata_Offset in gpu.controll)
@@ -159,6 +168,8 @@ draw_scanline :: proc(line: u8) -> (ok: bool) {
 
 			insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
 		}
+
+		log.warn(win_tile_ids)
 	}
 
 
@@ -188,6 +199,8 @@ insert_tile_in_framebuffer :: proc(
 	#unroll for x in 0 ..< 8 {
 		low := (left >> u8(x)) & 1
 		high := (right >> u8(x)) & 1
+
+		// log.warn(palette[(high << 1) + low])
 		framebuffer[(u8(x) + pos.x) + (pos.y * SCREEN_WIDTH)] = palette[(high << 1) + low]
 	}
 

@@ -65,6 +65,8 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 	cpu.interrupt.enable = {}
 	cpu.interrupt.flags = {}
 
+	cpu.joypad = {.B_Left, .A_Right, .Select_Up, .Start_Down, .Select_DPad, .Select_Buttons}
+
 	io = io_reset
 
 	for &pixel in framebuffer {
@@ -109,35 +111,45 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 
 step_cpu :: proc() {
 	opcode := rom[cpu.PC]
+	if opcode == 0xFB {
+		panic("EI")
+	}
+
 	instruction := inst.UnprefixedInstructions[opcode]
 
 	// di
 	if cpu.pre_opcode == 0xF3 {
 		cpu.interrupt.master = false
-		// ei
-	} else if cpu.pre_opcode == 0xFB {
+	}
+	if cpu.pre_opcode == 0xFB {
 		cpu.interrupt.master = true
 	}
 
 
-	operand: Operand
-	switch instruction.bytes - 1 {
-	case 1:
-		operand = read_u8(cpu.PC + 1)
-	case 2:
-		operand = read_u16(cpu.PC + 1)
-	}
+	when ODIN_DEBUG {
+		operand: Operand
+		switch instruction.bytes - 1 {
+		case 1:
+			operand = read_u8(cpu.PC + 1)
+		case 2:
+			operand = read_u16(cpu.PC + 1)
+		}
 
-	append(
-		&debug_data,
-		Instruction_Debug_Data {
-			instruction.mnemonic == .PREFIX,
-			opcode,
-			operand,
-			cpu.PC,
-			instruction.mnemonic,
-		},
-	)
+
+		log.infof("At 0x%04X: [%02X; %04X] %s", cpu.PC, opcode, operand, instruction.name)
+
+
+		append(
+			&debug_data,
+			Instruction_Debug_Data {
+				instruction.mnemonic == .PREFIX,
+				opcode,
+				operand,
+				cpu.PC,
+				instruction.mnemonic,
+			},
+		)
+	}
 
 	#partial switch instruction.mnemonic {
 	case .PREFIX:
@@ -145,14 +157,12 @@ step_cpu :: proc() {
 		opcode = rom[cpu.PC]
 		instruction = inst.PrefixedInstructions[opcode]
 		execute_prefixed_instruction(opcode)
-	case .HALT:
-		return
 	case:
 		execute_instruction(opcode)
 	}
 
 	#partial switch instruction.mnemonic {
-	case .CALL, .JR, .JP, .RET, .RETI, .RST:
+	case .CALL, .HALT, .JR, .JP, .RET, .RETI, .RST:
 		break
 	case .ILLEGAL_D3,
 	     .ILLEGAL_DD,
@@ -173,7 +183,6 @@ step_cpu :: proc() {
 	cpu.pre_opcode = opcode
 
 	for cycle in instruction.cycles {
-
 		cpu.ticks += u64(cycle)
 	}
 
@@ -1335,10 +1344,10 @@ ccf :: proc() {
 cp_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
-	diff := cpu.registers.A - mem
+	diff := (cpu.registers.A) - (mem)
 	toggle_flag(diff == 0, .Z)
-	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .Z)
-	toggle_flag(mem > cpu.registers.A, .Z)
+	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .H)
+	toggle_flag(mem > cpu.registers.A, .C)
 	cpu.registers.F += {.N}
 }
 
@@ -1393,8 +1402,9 @@ dec16 :: proc($r16: R16) {
 }
 
 halt :: proc() {
-	//TODO: implement halt
-	panic("halt is not implemented yet")
+	if !cpu.interrupt.master {
+		cpu.PC += 1
+	}
 }
 
 inc8 :: proc($r8: R8) {
@@ -1428,7 +1438,7 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 	}) {
 	if !is_condition_valid(cc) {
 		when mode == .N16 {
-			cpu.PC += 2
+			cpu.PC += 3
 		} else {
 			cpu.PC += 1
 		}
@@ -1444,7 +1454,7 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 
 jr :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		log.warn("cc not")
+		log.fatal("cc invalid")
 		cpu.PC += 2
 		return
 	}
@@ -1486,12 +1496,12 @@ ld_n16_A :: proc() {
 
 
 ldh_n8_A :: proc() {
-	n := u16(read_u8(cpu.PC + 1))
-	cpu.registers.A = read_u8(Address(0xFF00 + n))
+	n := read_u8(cpu.PC + 1)
+	write_u8(Address(0xFF00 | u16(n)), cpu.registers.A)
 }
 
 ldh_C_A :: proc() {
-	write_u8(Address(0xFF00 + u16(cpu.registers.C)), cpu.registers.A)
+	write_u8(Address(0xFF00 | u16(cpu.registers.C)), cpu.registers.A)
 }
 
 ld_A_r16 :: proc($r16: R16) {
@@ -1503,12 +1513,13 @@ ld_A_n16 :: proc() {
 }
 
 ldh_A_n8 :: proc() {
-	n := u16(read_u8(cpu.PC + 1))
-	write_u8(Address(0xFF00 + n), cpu.registers.A)
+	n := read_u8(cpu.PC + 1)
+	cpu.registers.A = read_u8(Address(0xFF00 | u16(n)))
+
 }
 
 ldh_A_C :: proc() {
-	cpu.registers.A = read_u8(Address(0xFF00 + u16(cpu.registers.C)))
+	cpu.registers.A = read_u8(Address(0xFF00 | u16(cpu.registers.C)))
 }
 
 ld_sp_n16 :: proc() {
@@ -1520,11 +1531,17 @@ ld_n16_SP :: proc() {
 }
 
 ld_MHL_A :: proc($mode: enum {
-		HLI = 1,
-		HLD = -1,
+		HLI,
+		HLD,
 	}) {
 	write_u8(Address(cpu.registers.HL), cpu.registers.A)
-	cpu.registers.HL = cpu.registers.HL + 1 when mode == .HLI else cpu.registers.HL - 1
+
+
+	when mode == .HLI {
+		cpu.registers.HL += 1
+	} else {
+		cpu.registers.HL -= 1
+	}
 }
 
 
@@ -1594,6 +1611,7 @@ ret :: proc($cc: ConditionCode) {
 }
 
 reti :: proc() {
+	log.fatal("RETI")
 	cpu.interrupt.master = true
 	cpu.PC = Address(read_u16(cpu.SP))
 	cpu.SP += 2

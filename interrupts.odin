@@ -3,14 +3,20 @@ package main
 import "core:log"
 import rl "vendor:raylib"
 
-interrupt_step :: proc(texture: ^rl.Texture) {
+interrupt_step :: proc(texture: rl.Texture) {
 	if !cpu.interrupt.master do return
 	// && !cpu.interrupt.enable && !cpu.interrupt.flags
 	fire := cpu.interrupt.enable & cpu.interrupt.flags
+	if cpu.interrupt.flags != {} {
+		log.warn(cpu.interrupt.flags)
+	}
 
+	if cpu.interrupt.enable != {} {
+		log.warn(cpu.interrupt.enable)
+	}
 
 	if .VBlank in fire {
-		// log.fatal(fire)
+		log.fatal(fire)
 		cpu.interrupt.flags -= {.VBlank}
 		vblank(texture)
 	}
@@ -39,19 +45,22 @@ interrupt_step :: proc(texture: ^rl.Texture) {
 
 }
 
-vblank :: proc(texture: ^rl.Texture) {
-	rl.UpdateTexture(texture^, &framebuffer)
+vblank :: proc(texture: rl.Texture) {
 
 	@(static) start_time: f64
 	end_time := rl.GetTime()
-
+	//
 	if (start_time - end_time < 1 / 60) {
 		rl.WaitTime(1 / 60)
 	}
 
+
+	log.fatal("Vblank render")
+	rl.UpdateTexture(texture, &framebuffer)
+
 	cpu.interrupt.master = false
 	cpu.SP -= 2
-	write_u16(cpu.PC, u16(cpu.SP))
+	write_u16(cpu.SP, u16(cpu.PC))
 	cpu.PC = 0x40
 
 	cpu.ticks += 12
@@ -63,7 +72,7 @@ lcd_Stat :: proc() {
 	cpu.interrupt.master = false
 
 	cpu.SP -= 2
-	write_u16(cpu.PC, u16(cpu.SP))
+	write_u16(cpu.SP, u16(cpu.PC))
 
 	cpu.PC = 0x48
 
@@ -74,7 +83,7 @@ timer :: proc() {
 	cpu.interrupt.master = false
 
 	cpu.SP -= 2
-	write_u16(cpu.PC, u16(cpu.SP))
+	write_u16(cpu.SP, u16(cpu.PC))
 
 	cpu.PC = 0x50
 
@@ -85,7 +94,7 @@ serial :: proc() {
 	cpu.interrupt.master = false
 
 	cpu.SP -= 2
-	write_u16(cpu.PC, u16(cpu.SP))
+	write_u16(cpu.SP, u16(cpu.PC))
 
 	cpu.PC = 0x58
 
@@ -96,16 +105,10 @@ joypad :: proc() {
 	cpu.interrupt.master = false
 
 	cpu.SP -= 2
-	write_u16(cpu.PC, u16(cpu.SP))
+	write_u16(cpu.SP, u16(cpu.PC))
 
 	cpu.PC = 0x60
 
 	cpu.ticks += 12
-}
-
-return_from_interrupt :: proc() {
-	cpu.interrupt.master = false
-	cpu.PC = Address(read_u16(cpu.SP))
-	cpu.SP += 2
 }
 

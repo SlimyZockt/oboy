@@ -307,13 +307,6 @@ io_reset := [0x100]u8 {
 	0x00,
 }
 
-rom: [0x8000]u8
-extern_ram: [0x2000]u8
-vram: [0x2000]u8
-oam: [0x00A0]u8
-wram: [0x2000]u8
-hram: [0x80]u8
-io: [0x100]u8
 
 get_reg16 :: proc($r16: R16) -> (reg: ^u16) {
 	when r16 == .NONE {
@@ -486,6 +479,8 @@ read_u8 :: proc(address: Address) -> u8 {
 		return gpu.scroll_y
 	case address == 0xFF43:
 		return gpu.scroll_x
+	case address == 0xFF44:
+		return gpu.scanline
 	case address == 0xFF00:
 		// assert(false, "todo")
 		log.warn("JOYP not implemnted yet")
@@ -498,6 +493,8 @@ read_u8 :: proc(address: Address) -> u8 {
 		return hram[address - MM_Start[MM.Hram]]
 	case is_address_in_mm(address, MM.IO):
 		return oam[address - MM_Start[MM.IO]]
+	case address == 0xFF00:
+		return transmute(u8)cpu.joypad
 	case:
 		log.panicf("Reading Adress: 0x%04X is invalid;", address)
 	}
@@ -523,6 +520,7 @@ write_u8 :: proc(address: Address, value: u8) {
 		hram[address - MM_Start[MM.Hram]] = value
 	case address == 0xFF40:
 		gpu.controll = transmute(bit_set[LCD_Control;u8])value
+		log.fatal(gpu.controll)
 	case address == 0xFF42:
 		gpu.scroll_y = value
 	case address == 0xFF43:
@@ -548,7 +546,7 @@ write_u8 :: proc(address: Address, value: u8) {
 	case address == 0xFF0F:
 		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
 	case:
-		log.panicf("Writing %v Adress: 0x%04X is invalid", value, address)
+		log.infof("Writing %v Adress: 0x%04X is invalid", value, address)
 	}
 
 }
