@@ -363,7 +363,7 @@ main :: proc() {
 		step_cpu()
 		step_gpu()
 
-		rl.UpdateTexture(texture, &framebuffer)
+		// rl.UpdateTexture(texture, &framebuffer)
 
 
 		// log.warn(

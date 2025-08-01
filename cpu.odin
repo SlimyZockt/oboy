@@ -111,9 +111,6 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 
 step_cpu :: proc() {
 	opcode := rom[cpu.PC]
-	if opcode == 0xFB {
-		panic("EI")
-	}
 
 	instruction := inst.UnprefixedInstructions[opcode]
 
