@@ -1,6 +1,7 @@
 package main
 
 import "base:intrinsics"
+import "core:fmt"
 import "core:log"
 import inst "instructions"
 
@@ -111,10 +112,6 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 
 step_cpu :: proc() {
 	opcode := rom[cpu.PC]
-	if opcode == 0xFB {
-		panic("EI")
-	}
-
 	instruction := inst.UnprefixedInstructions[opcode]
 
 	// di
@@ -127,6 +124,9 @@ step_cpu :: proc() {
 
 
 	when ODIN_DEBUG {
+
+		@(static) v38: u8
+
 		operand: Operand
 		switch instruction.bytes - 1 {
 		case 1:
@@ -135,20 +135,17 @@ step_cpu :: proc() {
 			operand = read_u16(cpu.PC + 1)
 		}
 
+		if opcode == 0xFF {
+			v38 += 1
+		}
+		if v38 == 3 {
+			panic("somethig went wrong")
+		}
 
-		log.infof("At 0x%04X: [%02X; %04X] %s", cpu.PC, opcode, operand, instruction.name)
 
+		fmt.printfln("At 0x%04X: [%02X; %04X] %s", cpu.PC, opcode, operand, instruction.name)
 
-		append(
-			&debug_data,
-			Instruction_Debug_Data {
-				instruction.mnemonic == .PREFIX,
-				opcode,
-				operand,
-				cpu.PC,
-				instruction.mnemonic,
-			},
-		)
+		run_instructions += {instruction.mnemonic}
 	}
 
 	#partial switch instruction.mnemonic {
@@ -160,9 +157,8 @@ step_cpu :: proc() {
 	case:
 		execute_instruction(opcode)
 	}
-
 	#partial switch instruction.mnemonic {
-	case .CALL, .HALT, .JR, .JP, .RET, .RETI, .RST:
+	case .CALL, .HALT, .JR, .JP, .RST, .RET, .RETI:
 		break
 	case .ILLEGAL_D3,
 	     .ILLEGAL_DD,
@@ -182,8 +178,8 @@ step_cpu :: proc() {
 
 	cpu.pre_opcode = opcode
 
-	for cycle in instruction.cycles {
-		cpu.ticks += u64(cycle)
+	if len(instruction.cycles) == 1 {
+		cpu.ticks += u64(instruction.cycles[0])
 	}
 
 }
@@ -1328,11 +1324,9 @@ call_n16 :: proc($cc: ConditionCode) {
 		cpu.PC += 3
 		return
 	}
+
+	push_sp(u16(cpu.PC + 3))
 	n := read_u16(cpu.PC + 1)
-
-	cpu.SP -= 2
-	write_u16(cpu.SP, n)
-
 	cpu.PC = Address(n)
 }
 
@@ -1381,7 +1375,7 @@ dec8 :: proc($r8: R8) {
 	target^ -= 1
 
 	toggle_flag(target^ == 0, .Z)
-	toggle_flag(is_half_carried_add(target^, 1), .H)
+	toggle_flag(is_half_carried_sub(target^, 1), .H)
 	cpu.registers.F += {.N}
 }
 
@@ -1454,7 +1448,6 @@ jp :: proc($cc: ConditionCode, $mode: enum u8 {
 
 jr :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		log.fatal("cc invalid")
 		cpu.PC += 2
 		return
 	}
@@ -1582,15 +1575,11 @@ or_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 }
 
 pop_r16 :: proc($r16: R16) {
-	get_reg16(r16)^ = read_u16(cpu.SP)
-	cpu.SP += 2
-
+	get_reg16(r16)^ = pop_sp()
 }
 
 push_r16 :: proc($r16: R16) {
-	cpu.SP -= 2
-	write_u16(cpu.SP, get_reg16(r16)^)
-
+	push_sp(get_reg16(r16)^)
 }
 
 res_r8 :: proc($bit: u8, $r8: R8) where 0 <= bit && bit <= 7 {
@@ -1603,18 +1592,16 @@ res_HL :: proc($bit: u8) where 0 <= bit && bit <= 7 {
 
 ret :: proc($cc: ConditionCode) {
 	if !is_condition_valid(cc) {
-		cpu.PC += 3
+		cpu.PC += 1
 		return
 	}
-	cpu.PC = Address(read_u16(cpu.SP))
-	cpu.SP += 2
+	cpu.PC = Address(pop_sp())
 }
 
 reti :: proc() {
 	log.fatal("RETI")
 	cpu.interrupt.master = true
-	cpu.PC = Address(read_u16(cpu.SP))
-	cpu.SP += 2
+	cpu.PC = Address(pop_sp())
 }
 
 rl_r8 :: proc($r8: R8) {
@@ -1719,8 +1706,8 @@ rrca :: proc() {
 }
 
 rst :: proc($vec: VEC) {
-	cpu.SP -= 2
-	write_u16(cpu.SP, u16(cpu.PC))
+	push_sp(u16(cpu.PC + 1))
+
 
 	cpu.PC = Address(vec)
 }

@@ -1,21 +1,22 @@
 package main
 
 import "core:log"
+import "core:math"
 
 Color :: distinct [3]u8
 Palette :: distinct [4]Color
 
 SCREEN_WIDTH :: 160
-SCREEN_HIGHT :: 144
+SCREEN_HEIGHT :: 144
 SCANLINES :: 154
 
 @(rodata)
-DEFAULT_PALETTE := Palette{{255, 255, 255}, {192, 192, 192}, {96, 96, 96}, {255, 0, 0}}
+DEFAULT_PALETTE := Palette{{255, 255, 255}, {192, 192, 192}, {96, 96, 96}, {0, 0, 0}}
 
 bg_palette := DEFAULT_PALETTE
 sprite_palettes := [2]Palette{DEFAULT_PALETTE, DEFAULT_PALETTE}
 
-Framebuffer :: [SCREEN_HIGHT * SCREEN_WIDTH]Color
+Framebuffer :: [SCREEN_HEIGHT * SCREEN_WIDTH]Color
 framebuffer: Framebuffer
 
 // dots
@@ -57,7 +58,6 @@ step_gpu :: proc() {
 			if .VBlank in cpu.interrupt.enable {
 				cpu.interrupt.flags += {.VBlank}
 				assert(.VBlank in cpu.interrupt.enable)
-
 				assert(.VBlank in cpu.interrupt.flags)
 			}
 
@@ -73,7 +73,7 @@ step_gpu :: proc() {
 
 		gpu.scanline += 1
 
-		if gpu.scanline >= 153 {
+		if gpu.scanline > 153 {
 			gpu.scanline = 0
 			gpu.mode = .OAM
 		}
@@ -95,85 +95,134 @@ step_gpu :: proc() {
 	}
 }
 
-draw_scanline :: proc(line: u8) -> (ok: bool) {
-	if 0 < line && line <= SCANLINES {
-		return
-	}
+draw_scanline :: proc(line: u8) {
+	assert(0 <= line && line < SCANLINES)
 
 	// if .LCD_PPU_Enable in gpu.controll do return
 
 
-	horizontal_offset: Address = (((Address(line) + Address(gpu.scroll_y)) & 255) >> 3) << 5
-	log.debugf("OFFSET: 0x%04X", horizontal_offset)
+	{ 	// get_tiles
+		// tiles: [193]Tile
 
-	is_drawing_allowed := .Background_Window_Enable in gpu.controll
-	if is_drawing_allowed {
-		// win_tile_map_area := 0x9C00 if .Win_Tile_Map_Area in gpu.lcdc else 0x9800
-		bg_offset: Address = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
-		bg_offset += horizontal_offset
-		log.debugf("BACKGROUND ADDRESS: 0x%04X", bg_offset)
-		bg_tile_ids := vram[bg_offset:][:SCREEN_WIDTH >> 3]
 
-		for id, x in bg_tile_ids {
-			tile := get_tile(id, .Tiledata_Offset in gpu.controll)
+		tile_map_offset: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
+		tile_map_offset += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
-			display_pos := Vec2{u8((id << 5) + u8(x)), line}
+		tile_data_offset: u16 = .Tiledata_Offset in gpu.controll ? 0x0000 : 0x0800
 
-			insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
+		line_offset := u16(gpu.scroll_x) >> 3
+
+		y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
+		// x := gpu.scroll_x & 0b0000_0111
+
+		tile_index := vram[tile_map_offset + line_offset]
+		// screen_ :=
+
+		pixel_offset := int(gpu.scanline) * SCREEN_WIDTH
+
+
+		for i in 0 ..< 20 {
+			tile_address := tile_map_offset
+			// + (u16(tile_index) << 4)
+			t := transmute(TileData)(vram[tile_address + (2 * u16(y) - 1):][:2])
+			left := t[0]
+			right := t[1]
+			// left: u8 = 0x3B
+			// right: u8 = 0x7C
+
+			#unroll for x in 0 ..< 8 {
+				low := (left >> u8(x)) & 1
+				high := (right >> u8(x)) & 1
+
+
+				color := bg_palette[(high << 1) | low]
+
+
+				// log.warn(palette[(high << 1) + low])
+				// screen_pos := screen_x + (screen_y * SCREEN_WIDTH)
+				framebuffer[pixel_offset + (i << 3) + x] = color
+			}
+
+			// pixel_offset += 8
+
+			line_offset = (line_offset + 1) & 31
+			tile_index = vram[tile_map_offset + line_offset]
 		}
 
-		log.warn(bg_tile_ids)
-	}
-
-	if .OBJ_Enable in gpu.controll {
-		objects: [10]Object
-		j := 0
-		for i in 0 ..< 40 {
-			id := i * 4
-
-			// log.debugf("OAM ADDRESS: 0x%04X", id)
-
-			if oam[id] != line do continue
-
-			object := &objects[j]
-
-			object.pos.y = oam[id]
-			object.pos.x = oam[id + 1]
-			object.tile_index = oam[id + 2]
-			object.flags = transmute(bit_set[ObjectFlags;u8])oam[id + 3]
-
-			tile := get_tile(objects[j].tile_index, false)
-
-			palette := .DMG_Pallet in object.flags ? sprite_palettes[1] : sprite_palettes[0]
-
-			insert_tile_in_framebuffer(&framebuffer, object.pos, tile, palette)
-
-			if j == 9 do break
-			j += 1
-		}
 
 	}
 
-	if is_drawing_allowed || .Window_Enable in gpu.controll {
-		win_offset: Address = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
-		win_offset += horizontal_offset
-
-		log.debugf("WINDOW ADDRESS: 0x%04X", win_offset)
-		win_tile_ids := vram[win_offset:][:SCREEN_WIDTH >> 3]
-
-		for id, x in win_tile_ids {
-			tile := get_tile(id, .Tiledata_Offset in gpu.controll)
-
-			display_pos := Vec2{u8((id << 5) + u8(x)), line}
-
-			insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
-		}
-
-		log.warn(win_tile_ids)
-	}
-
-
-	return true
+	// horizontal_offset: Address = (((Address(line) + Address(gpu.scroll_y)) & 255) >> 3) << 5
+	// log.debugf("OFFSET: 0x%04X", horizontal_offset)
+	//
+	// is_drawing_allowed := .Background_Window_Enable in gpu.controll
+	// if is_drawing_allowed {
+	// 	// win_tile_map_area := 0x9C00 if .Win_Tile_Map_Area in gpu.lcdc else 0x9800
+	// 	bg_offset: Address = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
+	// 	bg_offset += horizontal_offset
+	// 	log.debugf("BACKGROUND ADDRESS: 0x%04X", bg_offset)
+	// 	bg_tile_ids := vram[bg_offset:][:SCREEN_WIDTH >> 3]
+	//
+	// 	for id, x in bg_tile_ids {
+	// 		tile := get_tile(id, .Tiledata_Offset in gpu.controll)
+	//
+	// 		display_pos := Vec2{u8((id << 5) + u8(x)), line}
+	//
+	// 		insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
+	// 	}
+	//
+	// 	log.warn(bg_tile_ids)
+	// }
+	//
+	// if .OBJ_Enable in gpu.controll {
+	// 	objects: [10]Object
+	// 	j := 0
+	// 	for i in 0 ..< 40 {
+	// 		id := i * 4
+	//
+	// 		// log.debugf("OAM ADDRESS: 0x%04X", id)
+	//
+	// 		if oam[id] != line do continue
+	//
+	// 		object := &objects[j]
+	//
+	// 		object.pos.y = oam[id]
+	// 		object.pos.x = oam[id + 1]
+	// 		object.tile_index = oam[id + 2]
+	// 		object.flags = transmute(bit_set[ObjectFlags;u8])oam[id + 3]
+	//
+	// 		tile := get_tile(objects[j].tile_index, false)
+	//
+	// 		palette := .DMG_Pallet in object.flags ? sprite_palettes[1] : sprite_palettes[0]
+	//
+	// 		insert_tile_in_framebuffer(&framebuffer, object.pos, tile, palette)
+	//
+	// 		if j == 9 do break
+	// 		j += 1
+	// 	}
+	//
+	// }
+	//
+	// if is_drawing_allowed || .Window_Enable in gpu.controll {
+	// 	win_offset: Address = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
+	// 	win_offset += horizontal_offset
+	//
+	// 	log.debugf("WINDOW ADDRESS: 0x%04X", win_offset)
+	// 	win_tile_ids := vram[win_offset:][:SCREEN_WIDTH >> 3]
+	//
+	// 	for id, x in win_tile_ids {
+	// 		tile := get_tile(id, .Tiledata_Offset in gpu.controll)
+	//
+	// 		display_pos := Vec2{u8((id << 5) + u8(x)), line}
+	//
+	// 		insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
+	// 	}
+	//
+	// 	log.warn(win_tile_ids)
+	// }
+	//
+	//
+	// return true
 }
 
 TileData :: distinct [16]u8

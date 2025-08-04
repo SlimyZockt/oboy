@@ -3,7 +3,6 @@ package main
 import "base:intrinsics"
 import "base:runtime"
 import "core:c"
-import "core:c/libc"
 import "core:fmt"
 import "core:image"
 import "core:image/bmp"
@@ -12,6 +11,8 @@ import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:sync"
+import "core:thread"
 
 import vmem "core:mem/virtual"
 
@@ -33,6 +34,9 @@ Interrupt :: enum u8 {
 	Timer,
 	Serial,
 	Joypad,
+	_,
+	_,
+	_,
 }
 
 Cpu :: struct {
@@ -109,6 +113,7 @@ Gpu_Mode :: enum u8 {
 }
 
 Gpu :: struct {
+	draw:     bool,
 	mode:     Gpu_Mode,
 	controll: bit_set[LCD_Control;u8],
 	scroll_x: u8,
@@ -152,6 +157,8 @@ g_ctx: runtime.Context
 cpu: Cpu
 gpu: Gpu
 
+mutex: sync.Mutex
+
 rom: [0x8000]u8
 extern_ram: [0x2000]u8
 vram: [0x2000]u8
@@ -162,7 +169,7 @@ io: [0x100]u8
 
 debug_arena: vmem.Arena
 
-sig_handler :: proc "c" (_: libc.int) {
+sig_handler :: proc "c" (_: c.int) {
 	context = g_ctx
 	print_debug_data()
 
@@ -211,54 +218,56 @@ rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c
 }
 
 
+run_instructions: bit_set[inst.Mnemonic]
+
 print_debug_data :: proc() {
 	DEBUG_FOLDER :: "debug"
 	PRINT_LENGTH :: 30
 
-	trace_log: string = ---
-	trace_log_builder: strings.Builder
-	defer delete(trace_log_builder.buf)
-	for instruction_data in debug_data {
-		lookup :=
-			inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
-
-		instruction := lookup[instruction_data.opcode]
-
-		fmt.sbprintfln(
-			&trace_log_builder,
-			"At 0x%04X: [%02X; %04X] %s",
-			instruction_data.pc,
-			instruction_data.opcode,
-			instruction_data.operands,
-			instruction.name,
-		)
-	}
-
-	trace_log = strings.to_string(trace_log_builder)
+	// trace_log_builder: strings.Builder
+	// defer strings.builder_destroy(&trace_log_builder)
+	// for instruction_data in debug_data {
+	// 	lookup :=
+	// 		inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
+	//
+	// 	instruction := lookup[instruction_data.opcode]
+	//
+	// 	fmt.sbprintfln(
+	// 		&trace_log_builder,
+	// 		"0x%04X, %02X, %04X, %s",
+	// 		instruction_data.pc,
+	// 		instruction_data.opcode,
+	// 		instruction_data.operands,
+	// 		instruction.name,
+	// 	)
+	// }
+	//
+	// trace_log := strings.to_string(trace_log_builder)
 
 	if !os.exists(DEBUG_FOLDER) {
 		os.make_directory(DEBUG_FOLDER)
 	}
 
-	os.write_entire_file(DEBUG_FOLDER + "/instrcution_trace.log", transmute([]u8)trace_log[:])
-	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
+	// os.write_entire_file(DEBUG_FOLDER + "/trace_log.csv", transmute([]u8)trace_log[:])
 	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
 	os.write_entire_file(DEBUG_FOLDER + "/hram.bin", hram[:])
 	os.write_entire_file(DEBUG_FOLDER + "/oam.bin", oam[:])
 	os.write_entire_file(DEBUG_FOLDER + "/io.bin", io[:])
-	os.write_entire_file(DEBUG_FOLDER + "/warm.bin", wram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/wram.bin", wram[:])
 
 	img, ok := image.pixels_to_image(
 		transmute([]image.RGB_Pixel)framebuffer[:],
 		SCREEN_WIDTH,
-		SCREEN_HIGHT,
+		SCREEN_HEIGHT,
 	)
 	ensure(ok)
 
 	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
 	ensure(err == nil)
 
+	log.debug(run_instructions)
 }
+
 
 assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
 	print_debug_data()
@@ -289,15 +298,11 @@ main :: proc() {
 
 	rl.SetTraceLogLevel(.ALL)
 	rl.SetTraceLogCallback(rl_trace_log)
-	libc.signal(libc.SIGSEGV, sig_handler)
+	// libc.signal(libc.SIGSEGV, sig_handler)
 	// libc.signal(libc.SIGILL, sig_handler)
 
-	arena_err := vmem.arena_init_growing(&debug_arena)
-	ensure(arena_err == nil)
-	context.temp_allocator = vmem.arena_allocator(&debug_arena)
-
-	debug_data = make([dynamic]Instruction_Debug_Data, context.temp_allocator)
-	vmem.arena_destroy(&debug_arena)
+	debug_data = make([dynamic]Instruction_Debug_Data)
+	defer delete(debug_data)
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -338,59 +343,64 @@ main :: proc() {
 		}
 		defer delete(cartridge)
 
-		for i in 0 ..< 0x8000 {
-			rom[i] = cartridge[i]
-		}
+		copy_slice(rom[:], cartridge[:])
 		assert(slice.equal(rom[:0x8000], cartridge[:0x8000]))
 
 	}
 
-
-	rl.InitWindow(SCREEN_WIDTH, SCREEN_HIGHT, "oboy")
-	defer rl.CloseWindow()
-
-	// texture := rl.LoadRenderTexture(SCREEN_WIDTH, SCREEN_HIGHT)
-	// defer rl.UnloadRenderTexture(texture)
-
-	img := rl.Image{&framebuffer, SCREEN_WIDTH, SCREEN_HIGHT, 1, .UNCOMPRESSED_R8G8B8}
-	texture := rl.LoadTextureFromImage(img)
-
-
 	load_boot_rom(&cpu)
 
-	// rl.SetTargetFPS(60)
-	for !rl.WindowShouldClose() {
+
+	t := thread.create_and_start_with_poly_data3(&framebuffer, &gpu.draw, &mutex, render)
+	assert(t != nil)
+
+	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, mutex: ^sync.Mutex) {
+		fmt.println("starting Raylib")
+		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
+		defer rl.CloseWindow()
+
+		img := rl.Image{nil, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
+		texture := rl.LoadTextureFromImage(img)
+
+		rl.SetTargetFPS(60)
+		for !rl.WindowShouldClose() {
+
+			// sync.mutex_lock(mutex)
+			if draw^ {
+				rl.UpdateTexture(texture, framebuffer)
+			}
+			// sync.mutex_unlock(mutex)
+
+			rl.BeginDrawing()
+
+			rl.DrawTexture(texture, 0, 0, rl.WHITE)
+
+			rl.ClearBackground(rl.WHITE)
+			rl.DrawFPS(10, 10)
+			rl.EndDrawing()
+		}
+		// fmt.println("closing Raylib")
+	}
+
+	for {
 		step_cpu()
 		step_gpu()
+		interrupt_step()
 
-		rl.UpdateTexture(texture, &framebuffer)
-
-
-		// log.warn(
-		// 	.VBlank in cpu.interrupt.enable,
-		// 	.VBlank in cpu.interrupt.flags,
-		// 	cpu.interrupt.master,
-		// )
-
-		interrupt_step(texture)
-
-		// rl.UpdateTexture(texture, &framebuffer)
-		rl.BeginDrawing()
-
-		rl.DrawTexture(texture, 0, 0, rl.WHITE)
-
-		rl.ClearBackground(rl.WHITE)
-		rl.DrawFPS(10, 10)
-		rl.EndDrawing()
+		if thread.is_done(t) {
+			thread.destroy(t)
+			break
+		}
 	}
+
 
 	when ODIN_DEBUG {
 		print_debug_data()
 	}
 }
 
-
-delete_trace_log :: proc(trace_log: [dynamic]Instruction_Debug_Data) {
-	delete(trace_log)
+Render_Data :: struct {
+	draw:        ^bool,
+	framebuffer: ^Framebuffer,
 }
 

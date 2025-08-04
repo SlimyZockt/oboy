@@ -482,9 +482,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-		// assert(false, "todo")
-		log.warn("JOYP not implemnted yet")
-		return 0
+		return transmute(u8)cpu.joypad
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
 	case address == 0xFFFF:
@@ -492,9 +490,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case is_address_in_mm(address, MM.Hram):
 		return hram[address - MM_Start[MM.Hram]]
 	case is_address_in_mm(address, MM.IO):
-		return oam[address - MM_Start[MM.IO]]
-	case address == 0xFF00:
-		return transmute(u8)cpu.joypad
+		return io[address - MM_Start[MM.IO]]
 	case:
 		log.panicf("Reading Adress: 0x%04X is invalid;", address)
 	}
@@ -520,7 +516,6 @@ write_u8 :: proc(address: Address, value: u8) {
 		hram[address - MM_Start[MM.Hram]] = value
 	case address == 0xFF40:
 		gpu.controll = transmute(bit_set[LCD_Control;u8])value
-		log.fatal(gpu.controll)
 	case address == 0xFF42:
 		gpu.scroll_y = value
 	case address == 0xFF43:
@@ -539,12 +534,12 @@ write_u8 :: proc(address: Address, value: u8) {
 		for &color, i in sprite_palettes[1] {
 			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
-	case is_address_in_mm(address, MM.IO):
-		io[address - MM_Start[MM.IO]] = value
 	case address == 0xFFFF:
 		cpu.interrupt.enable = transmute(bit_set[Interrupt;u8])value
 	case address == 0xFF0F:
 		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
+	case is_address_in_mm(address, MM.IO):
+		io[address - MM_Start[MM.IO]] = value
 	case:
 		log.infof("Writing %v Adress: 0x%04X is invalid", value, address)
 	}
@@ -554,5 +549,17 @@ write_u8 :: proc(address: Address, value: u8) {
 write_u16 :: proc(address: Address, value: u16) {
 	write_u8(address, u8(value & 0x00FF))
 	write_u8(address + 1, u8((value & 0xFF00) >> 8))
+}
+
+push_sp :: proc(value: u16) {
+	cpu.SP -= 2
+	write_u16(cpu.SP, value)
+	log.warnf("Push SP($%04X): 0x%04X", cpu.SP, value)
+}
+pop_sp :: proc() -> u16 {
+	value := read_u16(cpu.SP)
+	log.warnf("Pop SP($%04X): 0x%04X", cpu.SP, value)
+	cpu.SP += 2
+	return value
 }
 
