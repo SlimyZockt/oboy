@@ -145,7 +145,7 @@ step_cpu :: proc() {
 
 		fmt.printfln("At 0x%04X: [%02X; %04X] %s", cpu.PC, opcode, operand, instruction.name)
 
-		run_instructions += {instruction.mnemonic}
+		run_instruction_mnemonics += {instruction.mnemonic}
 	}
 
 	#partial switch instruction.mnemonic {
@@ -153,8 +153,16 @@ step_cpu :: proc() {
 		cpu.PC += 1
 		opcode = rom[cpu.PC]
 		instruction = inst.PrefixedInstructions[opcode]
+
+		if !run_cb_instructions[opcode] {
+			run_cb_instructions[opcode] = true
+		}
 		execute_prefixed_instruction(opcode)
 	case:
+		if !run_instructions[opcode] {
+			run_instructions[opcode] = true
+		}
+
 		execute_instruction(opcode)
 	}
 	#partial switch instruction.mnemonic {
@@ -187,38 +195,37 @@ step_cpu :: proc() {
 
 execute_instruction :: proc(opcode: u8) {
 	switch opcode {
-	case 0x0:
-		// NOOP
-		break
-	case 0x1:
+	case 0x00:
+	// NOOP
+	case 0x01:
 		ld_r16_n16(.BC)
-	case 0x2:
+	case 0x02:
 		ld_r16_A(.BC)
-	case 0x3:
+	case 0x03:
 		inc16(.BC)
-	case 0x4:
+	case 0x04:
 		inc8(.B)
-	case 0x5:
+	case 0x05:
 		dec8(.B)
-	case 0x6:
+	case 0x06:
 		ld_r8_n8(.B)
-	case 0x7:
+	case 0x07:
 		rlca()
-	case 0x8:
+	case 0x08:
 		ld_n16_SP()
-	case 0x9:
+	case 0x09:
 		add16_HL(.BC)
-	case 0xa:
+	case 0x0a:
 		ld_A_r16(.BC)
-	case 0xb:
+	case 0x0b:
 		dec16(.BC)
-	case 0xc:
+	case 0x0c:
 		inc8(.C)
-	case 0xd:
+	case 0x0d:
 		dec8(.C)
-	case 0xe:
+	case 0x0e:
 		ld_r8_n8(.C)
-	case 0xf:
+	case 0x0f:
 		rrca()
 	case 0x10:
 		stop()
@@ -679,7 +686,7 @@ execute_instruction :: proc(opcode: u8) {
 	case 0xf9:
 		ld_SP_HL()
 	case 0xfa:
-		ld_SP_HL()
+		ld_sp_n16()
 	case 0xfb:
 	case 0xfc:
 	case 0xfd:
@@ -1248,44 +1255,40 @@ get_argument_u16 :: proc($mode: U16_ARG_MODE, $r16: R16) -> u16 {
 
 adc_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
+	mem += u8(.C in cpu.registers.F)
+	res := u16(cpu.registers.A) + u16(mem)
 
-	reg_a := &cpu.registers.A
-	flags := &cpu.registers.F
-	carry := u8(.C in flags)
-	res := u16(reg_a^) + u16(mem) + u16(carry)
-	reg_a^ = u8(res)
+	toggle_flag(is_half_carried_add(cpu.registers.A, mem), .H)
 
-	half_carry := ((mem & 0xf) + (reg_a^ & 0xf) + (carry & 0xf)) & 0x10 == 0x10
+	cpu.registers.A = u8(res)
+
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFF, .C)
-	toggle_flag(half_carry, .H)
 	cpu.registers.F -= {.N}
 
 }
 
 add8_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
+	res := u16(cpu.registers.A) + u16(mem)
 
-	reg_a := &cpu.registers.A
-	res := u16(reg_a^) + u16(mem)
-	reg_a^ = u8(res)
+	toggle_flag(is_half_carried_add(cpu.registers.A, mem), .H)
 
+	cpu.registers.A = u8(res)
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFF, .C)
-	toggle_flag(is_half_carried_add(reg_a^, mem), .H)
 	cpu.registers.F -= {.N}
 }
 
 add16_HL :: proc($r16: R16) {
 	reg := get_reg16(r16)^
+	res := u32(cpu.registers.HL) + u32(reg)
 
-	reg_hl := &cpu.registers.HL
-	res := u32(reg_hl^) + u32(reg)
-	reg_hl^ = u16(res)
+	toggle_flag(is_half_carried_add(cpu.registers.HL, reg), .H)
+	cpu.registers.HL = u16(res)
 
 	toggle_flag(res == 0, .Z)
 	toggle_flag(res > 0xFFFF, .C)
-	toggle_flag(is_half_carried_add(reg_hl^, reg), .H)
 	cpu.registers.F -= {.N}
 }
 
@@ -1314,7 +1317,7 @@ and_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8) where (0 <= bit && bit <= 7) {
 	mem := get_argument_u8(mode, r8)
 
-	toggle_flag((mem << bit) & 0x1 == 0, .Z)
+	toggle_flag((mem & bit) == 0, .Z)
 	cpu.registers.F -= {.N}
 	cpu.registers.F += {.H}
 }
@@ -1338,9 +1341,10 @@ ccf :: proc() {
 cp_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
+	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .H)
+
 	diff := (cpu.registers.A) - (mem)
 	toggle_flag(diff == 0, .Z)
-	toggle_flag(is_half_carried_sub(cpu.registers.A, mem), .H)
 	toggle_flag(mem > cpu.registers.A, .C)
 	cpu.registers.F += {.N}
 }
@@ -1835,8 +1839,9 @@ swap_hl :: proc() {
 
 	lower := mem & 0xF
 	upper := (mem >> 0x4) & 0xF
-	write_u8(Address(cpu.registers.HL), (lower << 0x4) + upper)
-	toggle_flag(mem == 0, .Z)
+	val := (lower << 0x4) + upper
+	write_u8(Address(cpu.registers.HL), val)
+	toggle_flag(val == 0, .Z)
 	cpu.registers.F -= {.N, .H, .C}
 }
 
@@ -1845,7 +1850,7 @@ xor_A :: proc($mode: U8_ARG_MODE, $r8: R8) {
 	mem := get_argument_u8(mode, r8)
 
 	cpu.registers.A ~= mem
-	toggle_flag(mem == 0, .Z)
+	toggle_flag(cpu.registers.A == 0, .Z)
 	cpu.registers.F -= {.N, .H, .C}
 }
 

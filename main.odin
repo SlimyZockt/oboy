@@ -224,31 +224,31 @@ print_debug_data :: proc() {
 	DEBUG_FOLDER :: "debug"
 	PRINT_LENGTH :: 30
 
-	// trace_log_builder: strings.Builder
-	// defer strings.builder_destroy(&trace_log_builder)
-	// for instruction_data in debug_data {
-	// 	lookup :=
-	// 		inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
-	//
-	// 	instruction := lookup[instruction_data.opcode]
-	//
-	// 	fmt.sbprintfln(
-	// 		&trace_log_builder,
-	// 		"0x%04X, %02X, %04X, %s",
-	// 		instruction_data.pc,
-	// 		instruction_data.opcode,
-	// 		instruction_data.operands,
-	// 		instruction.name,
-	// 	)
-	// }
-	//
-	// trace_log := strings.to_string(trace_log_builder)
+	trace_log_builder: strings.Builder
+	defer strings.builder_destroy(&trace_log_builder)
+	for instruction_data in debug_data {
+		lookup :=
+			inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
+
+		instruction := lookup[instruction_data.opcode]
+
+		fmt.sbprintfln(
+			&trace_log_builder,
+			"0x%04X, %02X, %04X, %s",
+			instruction_data.pc,
+			instruction_data.opcode,
+			instruction_data.operands,
+			instruction.name,
+		)
+	}
+
+	trace_log := strings.to_string(trace_log_builder)
 
 	if !os.exists(DEBUG_FOLDER) {
 		os.make_directory(DEBUG_FOLDER)
 	}
 
-	// os.write_entire_file(DEBUG_FOLDER + "/trace_log.csv", transmute([]u8)trace_log[:])
+	os.write_entire_file(DEBUG_FOLDER + "/trace_log.csv", transmute([]u8)trace_log[:])
 	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
 	os.write_entire_file(DEBUG_FOLDER + "/hram.bin", hram[:])
 	os.write_entire_file(DEBUG_FOLDER + "/oam.bin", oam[:])
@@ -351,35 +351,46 @@ main :: proc() {
 	load_boot_rom(&cpu)
 
 
-	t := thread.create_and_start_with_poly_data3(&framebuffer, &gpu.draw, &mutex, render)
+	t := thread.create_and_start_with_poly_data2(&framebuffer, &mutex, render)
 	assert(t != nil)
 
-	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, mutex: ^sync.Mutex) {
+	render :: proc(framebuffer: ^Framebuffer, mutex: ^sync.Mutex) {
+
+		sync.mutex_lock(mutex)
+
+		// img := rl.Image{framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
+
+
+		// texture := rl.LoadTextureFromImage(img)
+		// defer rl.UnloadTexture(texture)
+
 		fmt.println("starting Raylib")
 		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
+
 		defer rl.CloseWindow()
 
-		img := rl.Image{nil, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
-		texture := rl.LoadTextureFromImage(img)
-
 		rl.SetTargetFPS(60)
+		sync.mutex_unlock(mutex)
 		for !rl.WindowShouldClose() {
 
-			// sync.mutex_lock(mutex)
-			if draw^ {
-				rl.UpdateTexture(texture, framebuffer)
-			}
-			// sync.mutex_unlock(mutex)
+			// log.warn(
+			// 	.VBlank in cpu.interrupt.enable,
+			// 	.VBlank in cpu.interrupt.flags,
+			// 	cpu.interrupt.master,
+			// )
 
 			rl.BeginDrawing()
 
-			rl.DrawTexture(texture, 0, 0, rl.WHITE)
+
+			// rl.UpdateTexture(texture, framebuffer)
 
 			rl.ClearBackground(rl.WHITE)
 			rl.DrawFPS(10, 10)
 			rl.EndDrawing()
 		}
-		// fmt.println("closing Raylib")
+		// for {
+		// 	fmt.println("starting Raylib")
+		// }
 	}
 
 	for {
@@ -387,10 +398,7 @@ main :: proc() {
 		step_gpu()
 		interrupt_step()
 
-		if thread.is_done(t) {
-			thread.destroy(t)
-			break
-		}
+		if thread.is_done(t) do break
 	}
 
 
