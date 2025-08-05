@@ -218,7 +218,9 @@ rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c
 }
 
 
-run_instructions: bit_set[inst.Mnemonic]
+run_instruction_mnemonics: bit_set[inst.Mnemonic]
+run_instructions: [0xFF]bool
+run_cb_instructions: [0xFF]bool
 
 print_debug_data :: proc() {
 	DEBUG_FOLDER :: "debug"
@@ -265,7 +267,21 @@ print_debug_data :: proc() {
 	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
 	ensure(err == nil)
 
-	log.debug(run_instructions)
+	log.debug(run_instruction_mnemonics)
+
+	fmt.print("Run instructions: ")
+	for used, i in run_instructions {
+		if !used do continue
+		fmt.printf("0x%02x, ", i)
+	}
+	fmt.print("\n")
+
+	fmt.print("Run cb instructions: ")
+	for used, i in run_cb_instructions {
+		if !used do continue
+		fmt.printf("0x%02x, ", i)
+	}
+	fmt.print("\n")
 }
 
 
@@ -351,46 +367,37 @@ main :: proc() {
 	load_boot_rom(&cpu)
 
 
-	t := thread.create_and_start_with_poly_data2(&framebuffer, &mutex, render)
+	t := thread.create_and_start_with_poly_data3(&framebuffer, &gpu.draw, &mutex, render)
 	assert(t != nil)
 
-	render :: proc(framebuffer: ^Framebuffer, mutex: ^sync.Mutex) {
-
-		sync.mutex_lock(mutex)
-
-		// img := rl.Image{framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
-
-
-		// texture := rl.LoadTextureFromImage(img)
-		// defer rl.UnloadTexture(texture)
-
+	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, mutex: ^sync.Mutex) {
 		fmt.println("starting Raylib")
 		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
-
 		defer rl.CloseWindow()
 
+		img := rl.Image{nil, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
+		texture := rl.LoadTextureFromImage(img)
+
 		rl.SetTargetFPS(60)
-		sync.mutex_unlock(mutex)
 		for !rl.WindowShouldClose() {
 
-			// log.warn(
-			// 	.VBlank in cpu.interrupt.enable,
-			// 	.VBlank in cpu.interrupt.flags,
-			// 	cpu.interrupt.master,
-			// )
+			if draw^ {
+				rl.UpdateTexture(texture, framebuffer)
+
+				sync.mutex_lock(mutex)
+				draw^ = false
+				sync.mutex_unlock(mutex)
+			}
 
 			rl.BeginDrawing()
 
-
-			// rl.UpdateTexture(texture, framebuffer)
+			rl.DrawTexture(texture, 0, 0, rl.WHITE)
 
 			rl.ClearBackground(rl.WHITE)
 			rl.DrawFPS(10, 10)
 			rl.EndDrawing()
 		}
-		// for {
-		// 	fmt.println("starting Raylib")
-		// }
+		// fmt.println("closing Raylib")
 	}
 
 	for {
@@ -398,7 +405,10 @@ main :: proc() {
 		step_gpu()
 		interrupt_step()
 
-		if thread.is_done(t) do break
+		if thread.is_done(t) {
+			thread.destroy(t)
+			break
+		}
 	}
 
 

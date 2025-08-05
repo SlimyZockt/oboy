@@ -1,7 +1,6 @@
 package main
 
-import "core:log"
-import "core:math"
+import "core:fmt"
 
 Color :: distinct [3]u8
 Palette :: distinct [4]Color
@@ -33,11 +32,17 @@ ObjectFlags :: enum u8 {
 
 Vec2 :: distinct [2]u8
 
+TileData :: distinct [16]u8
+Color_Index :: u8
+Tile :: distinct [64]Color_Index
 Object :: struct {
 	tile_index: u8,
 	flags:      bit_set[ObjectFlags;u8],
 	pos:        Vec2,
 }
+
+
+tiles: [384]Tile
 
 step_gpu :: proc() {
 
@@ -95,6 +100,27 @@ step_gpu :: proc() {
 	}
 }
 
+
+update_tile :: proc(address: Address) {
+	address := address
+
+	address = address & 0x1ffe
+	tile := u16(address >> 4)
+	y := (address >> 1) & 7
+
+	#unroll for x in 0 ..< 8 {
+		bit_index: u8 = 1 << (7 - u8(x))
+
+		msb: u8 = (vram[address] & bit_index != 0) ? 1 : 0
+		lsb: u8 = (vram[address + 1] & bit_index != 0) ? 2 : 0
+
+		// fmt.printfln("Tile Data %v: %v ", u16(y * 8) + u16(x), (msb + lsb))
+		tiles[tile][u16(y * 8) + u16(x)] = (msb + lsb)
+	}
+
+	fmt.printfln("Tile %v: %v", tile, tiles[tile])
+}
+
 draw_scanline :: proc(line: u8) {
 	assert(0 <= line && line < SCANLINES)
 
@@ -102,51 +128,34 @@ draw_scanline :: proc(line: u8) {
 
 
 	{ 	// get_tiles
-		// tiles: [193]Tile
-
 
 		tile_map_offset: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
 		tile_map_offset += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
-		tile_data_offset: u16 = .Tiledata_Offset in gpu.controll ? 0x0000 : 0x0800
 
 		line_offset := u16(gpu.scroll_x) >> 3
 
 		y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
-		// x := gpu.scroll_x & 0b0000_0111
+		x := gpu.scroll_x & 0b0000_0111
 
 		tile_index := vram[tile_map_offset + line_offset]
-		// screen_ :=
+		tile_data_offset: u16 = .Tiledata_Offset in gpu.controll ? 0x0000 : 0x0800
 
 		pixel_offset := int(gpu.scanline) * SCREEN_WIDTH
 
 
-		for i in 0 ..< 20 {
-			tile_address := tile_map_offset
-			// + (u16(tile_index) << 4)
-			t := transmute(TileData)(vram[tile_address + (2 * u16(y) - 1):][:2])
-			left := t[0]
-			right := t[1]
-			// left: u8 = 0x3B
-			// right: u8 = 0x7C
+		for _ in 0 ..< 160 {
+			color := tiles[tile_index][y * 8 + x]
 
-			#unroll for x in 0 ..< 8 {
-				low := (left >> u8(x)) & 1
-				high := (right >> u8(x)) & 1
+			framebuffer[pixel_offset] = bg_palette[color]
 
-
-				color := bg_palette[(high << 1) | low]
-
-
-				// log.warn(palette[(high << 1) + low])
-				// screen_pos := screen_x + (screen_y * SCREEN_WIDTH)
-				framebuffer[pixel_offset + (i << 3) + x] = color
+			pixel_offset += 1
+			x += 1
+			if (x == 8) {
+				x = 0
+				line_offset = (line_offset + 1) & 31
+				tile_index = vram[tile_map_offset + line_offset]
 			}
-
-			// pixel_offset += 8
-
-			line_offset = (line_offset + 1) & 31
-			tile_index = vram[tile_map_offset + line_offset]
 		}
 
 
@@ -225,15 +234,6 @@ draw_scanline :: proc(line: u8) {
 	// return true
 }
 
-TileData :: distinct [16]u8
-Tile :: distinct [64]Color
-
-get_tile :: proc(tile_id: u8, singed: bool) -> TileData {
-	offset: i16 = singed ? 0x0000 : 0x1000
-
-	idx := offset + i16(tile_id) * 16
-	return transmute(TileData)(vram[idx:][:16])
-}
 
 insert_tile_in_framebuffer :: proc(
 	framebuffer: ^Framebuffer,

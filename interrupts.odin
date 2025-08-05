@@ -1,6 +1,6 @@
 package main
 
-import "core:log"
+import "core:fmt"
 import rl "vendor:raylib"
 
 interrupt_step :: proc() {
@@ -9,28 +9,25 @@ interrupt_step :: proc() {
 	fire := cpu.interrupt.enable & cpu.interrupt.flags
 
 	if .VBlank in fire {
-		log.fatal(fire)
 		cpu.interrupt.flags -= {.VBlank}
 
-		// @(static) start_time: f64
-		// end_time := rl.GetTime()
-		// //
-		// if (start_time - end_time < 1 / 60) {
-		// 	rl.WaitTime(1 / 60)
-		// }
+		fmt.printfln("VBlank")
+		@(static) start_time: f64
+		end_time := rl.GetTime()
 		//
-		//
-		// log.fatal("Vblank render")
+		if (start_time - end_time < 1 / 60) {
+			rl.WaitTime(1 / 60)
+		}
 
 		gpu.draw = true
+		// for gpu.draw {}
 
 		cpu.interrupt.master = false
-		cpu.SP -= 2
-		write_u16(cpu.SP, u16(cpu.PC))
-		cpu.PC = 0x40
+		push_sp(u16(cpu.PC))
 
+		cpu.PC = 0x40
 		cpu.ticks += 12
-		// start_time = rl.GetTime()
+		start_time = rl.GetTime()
 	}
 
 	if .LCD in fire {

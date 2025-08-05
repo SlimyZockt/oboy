@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:math/rand"
 
@@ -438,8 +439,6 @@ is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 		return .C not_in cpu.registers.F
 	case .C:
 		return .C in cpu.registers.F
-	case nil, .NONE:
-		return true
 	}
 	panic("Condition error")
 }
@@ -451,20 +450,19 @@ is_address_in_mm :: #force_inline proc(address: Address, $range: MM) -> bool {
 }
 
 copy :: proc(dest: Address, source: Address, len: u64) {
-	for i in 0 ..= len {
+	for i in 0 ..< len {
 		write_u8(dest + Address(i), read_u8(source + Address(i)))
 	}
 }
 
 read_u8 :: proc(address: Address) -> u8 {
-	// log.infof("Reading Adress: 0x%04X", address)
 	switch {
 	case is_address_in_mm(address, MM.Rom) || is_address_in_mm(address, MM.Switch_Rom):
 		return rom[address]
-	case is_address_in_mm(address, MM.Vram):
-		return vram[address - MM_Start[MM.Vram]]
 	case is_address_in_mm(address, MM.External_Ram):
 		return extern_ram[address - MM_Start[MM.External_Ram]]
+	case is_address_in_mm(address, MM.Vram):
+		return vram[address - MM_Start[MM.Vram]]
 	case is_address_in_mm(address, MM.Wram):
 		return wram[address - MM_Start[MM.Wram]]
 	case is_address_in_mm(address, MM.OAM):
@@ -483,6 +481,7 @@ read_u8 :: proc(address: Address) -> u8 {
 		return gpu.scanline
 	case address == 0xFF00:
 		return transmute(u8)cpu.joypad
+	// return 0
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
 	case address == 0xFFFF:
@@ -492,7 +491,8 @@ read_u8 :: proc(address: Address) -> u8 {
 	case is_address_in_mm(address, MM.IO):
 		return io[address - MM_Start[MM.IO]]
 	case:
-		log.panicf("Reading Adress: 0x%04X is invalid;", address)
+		log.fatal("Reading Adress: 0x%04X is invalid;", address)
+		return 0
 	}
 }
 
@@ -502,12 +502,16 @@ read_u16 :: proc(address: Address) -> u16 {
 }
 
 
-write_u8 :: proc(address: Address, value: u8) {
+write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	switch {
 	case is_address_in_mm(address, MM.External_Ram):
 		extern_ram[address - MM_Start[MM.External_Ram]] = value
 	case is_address_in_mm(address, MM.Vram):
+		fmt.printfln("[%v] VRAM($%04X): 0x%02X", location, address, value)
 		vram[address - MM_Start[MM.Vram]] = value
+		if address <= 0x97FF {
+			update_tile(address)
+		}
 	case is_address_in_mm(address, MM.Wram):
 		wram[address - MM_Start[MM.Wram]] = value
 	case is_address_in_mm(address, MM.OAM):
