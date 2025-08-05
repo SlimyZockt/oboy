@@ -128,7 +128,6 @@ draw_scanline :: proc(line: u8) {
 
 
 	{ 	// get_tiles
-
 		tile_map_offset: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
 		tile_map_offset += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
