@@ -21,7 +21,7 @@ jobs:
           cd Odin
           make
           ./odin report
-          make -C "/home/runner/work/oboy/oboy/Odin/vendor/stb/src
+          make -C "/home/runner/work/oboy/oboy/Odin/vendor/stb/src"
           cd ..
           ./Odin/odin test .
         # run: odin check . -vet --strict-style
