@@ -219,8 +219,8 @@ rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c
 
 
 run_instruction_mnemonics: bit_set[inst.Mnemonic]
-run_instructions: [0xFF]bool
-run_cb_instructions: [0xFF]bool
+run_instructions: [0x100]bool
+run_cb_instructions: [0x100]bool
 
 print_debug_data :: proc() {
 	DEBUG_FOLDER :: "debug"

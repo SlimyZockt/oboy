@@ -121,13 +121,8 @@ step_cpu :: proc() {
 	}
 
 
-	opcode := rom[cpu.PC]
+	opcode := read_u8(cpu.PC)
 	instruction := inst.UnprefixedInstructions[opcode]
-	if instruction.mnemonic == .PREFIX {
-		cpu.PC += 1
-		opcode = rom[cpu.PC]
-		instruction = inst.PrefixedInstructions[opcode]
-	}
 	cpu.PC += 1
 
 	operand: Operand = u8(0)
@@ -158,25 +153,10 @@ step_cpu :: proc() {
 
 	cpu.PC += Address(instruction.bytes - 1)
 
-	#partial switch instruction.mnemonic {
-	case .PREFIX:
-		if !run_cb_instructions[opcode] {
-			run_cb_instructions[opcode] = true
-		}
+	fmt.printfln("PC OFF: %v", Address(instruction.bytes - 1))
 
-
-		execute_prefixed_instruction(opcode, operand)
-	case:
-		if !run_instructions[opcode] {
-			run_instructions[opcode] = true
-		}
-
-		execute_instruction(opcode, operand)
-	}
-
-
+	execute_instruction(opcode, operand)
 	cpu.pre_opcode = opcode
-
 
 	#partial switch instruction.mnemonic {
 	case .ILLEGAL_D3,
@@ -190,7 +170,7 @@ step_cpu :: proc() {
 	     .ILLEGAL_ED,
 	     .ILLEGAL_DB,
 	     .ILLEGAL_EB:
-		log.panic("Illagel instruction:", opcode)
+		log.panicf("Illagel instruction: 0x%02X", opcode)
 	}
 
 	if len(instruction.cycles) == 1 {
@@ -201,6 +181,12 @@ step_cpu :: proc() {
 
 
 execute_instruction :: proc(opcode: u8, operand: Operand) {
+	when ODIN_DEBUG {
+		if !run_cb_instructions[opcode] {
+			run_cb_instructions[opcode] = true
+		}
+	}
+
 	switch opcode {
 	case 0x00:
 	// NOOP
@@ -607,9 +593,9 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xc9:
 		ret()
 	case 0xca:
-		jp_cc(.Z, .N16, operand.(u8))
+		jp_cc(.Z, .N16, operand)
 	case 0xcb:
-		panic("prefixed instruction called")
+		execute_prefixed_instruction(operand.(u8))
 	case 0xcc:
 		call_cc_n16(.Z, operand.(u16))
 	case 0xcd:
@@ -664,7 +650,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xe8:
 		add16_SP_e8(operand.(u8))
 	case 0xe9:
-		jp(.HL, operand.(u16))
+		jp(.HL, operand)
 	case 0xea:
 		ld_n16_A(operand.(u16))
 	case 0xeb:
@@ -706,7 +692,12 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 }
 
 
-execute_prefixed_instruction :: proc(opcode: u8, operand: Operand) {
+execute_prefixed_instruction :: proc(opcode: u8) {
+	when ODIN_DEBUG {
+		if !run_cb_instructions[opcode] {
+			run_cb_instructions[opcode] = true
+		}
+	}
 	switch opcode {
 	case 0x00:
 		rlc_r8(.B)
@@ -837,133 +828,133 @@ execute_prefixed_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0x3f:
 		srl_r8(.A)
 	case 0x40:
-		bit_u3(0, .R8, .B, operand.(u8))
+		bit_u3(0, .R8, .B)
 	case 0x41:
-		bit_u3(0, .R8, .C, operand.(u8))
+		bit_u3(0, .R8, .C)
 	case 0x42:
-		bit_u3(0, .R8, .D, operand.(u8))
+		bit_u3(0, .R8, .D)
 	case 0x43:
-		bit_u3(0, .R8, .E, operand.(u8))
+		bit_u3(0, .R8, .E)
 	case 0x44:
-		bit_u3(0, .R8, .H, operand.(u8))
+		bit_u3(0, .R8, .H)
 	case 0x45:
-		bit_u3(0, .R8, .L, operand.(u8))
+		bit_u3(0, .R8, .L)
 	case 0x46:
-		bit_u3(0, .HL, .NONE, operand.(u8))
+		bit_u3(0, .HL, .NONE)
 	case 0x47:
-		bit_u3(0, .R8, .A, operand.(u8))
+		bit_u3(0, .R8, .A)
 	case 0x48:
-		bit_u3(1, .R8, .B, operand.(u8))
+		bit_u3(1, .R8, .B)
 	case 0x49:
-		bit_u3(1, .R8, .C, operand.(u8))
+		bit_u3(1, .R8, .C)
 	case 0x4a:
-		bit_u3(1, .R8, .D, operand.(u8))
+		bit_u3(1, .R8, .D)
 	case 0x4b:
-		bit_u3(1, .R8, .E, operand.(u8))
+		bit_u3(1, .R8, .E)
 	case 0x4c:
-		bit_u3(1, .R8, .H, operand.(u8))
+		bit_u3(1, .R8, .H)
 	case 0x4d:
-		bit_u3(1, .R8, .L, operand.(u8))
+		bit_u3(1, .R8, .L)
 	case 0x4e:
-		bit_u3(1, .HL, .NONE, operand.(u8))
+		bit_u3(1, .HL, .NONE)
 	case 0x4f:
-		bit_u3(1, .R8, .A, operand.(u8))
+		bit_u3(1, .R8, .A)
 	case 0x50:
-		bit_u3(2, .R8, .B, operand.(u8))
+		bit_u3(2, .R8, .B)
 	case 0x51:
-		bit_u3(2, .R8, .C, operand.(u8))
+		bit_u3(2, .R8, .C)
 	case 0x52:
-		bit_u3(2, .R8, .D, operand.(u8))
+		bit_u3(2, .R8, .D)
 	case 0x53:
-		bit_u3(2, .R8, .E, operand.(u8))
+		bit_u3(2, .R8, .E)
 	case 0x54:
-		bit_u3(2, .R8, .H, operand.(u8))
+		bit_u3(2, .R8, .H)
 	case 0x55:
-		bit_u3(2, .R8, .L, operand.(u8))
+		bit_u3(2, .R8, .L)
 	case 0x56:
-		bit_u3(2, .HL, .NONE, operand.(u8))
+		bit_u3(2, .HL, .NONE)
 	case 0x57:
-		bit_u3(2, .R8, .A, operand.(u8))
+		bit_u3(2, .R8, .A)
 	case 0x58:
-		bit_u3(3, .R8, .B, operand.(u8))
+		bit_u3(3, .R8, .B)
 	case 0x59:
-		bit_u3(3, .R8, .C, operand.(u8))
+		bit_u3(3, .R8, .C)
 	case 0x5a:
-		bit_u3(3, .R8, .D, operand.(u8))
+		bit_u3(3, .R8, .D)
 	case 0x5b:
-		bit_u3(3, .R8, .E, operand.(u8))
+		bit_u3(3, .R8, .E)
 	case 0x5c:
-		bit_u3(3, .R8, .H, operand.(u8))
+		bit_u3(3, .R8, .H)
 	case 0x5d:
-		bit_u3(3, .R8, .L, operand.(u8))
+		bit_u3(3, .R8, .L)
 	case 0x5e:
-		bit_u3(3, .HL, .NONE, operand.(u8))
+		bit_u3(3, .HL, .NONE)
 	case 0x5f:
-		bit_u3(3, .R8, .A, operand.(u8))
+		bit_u3(3, .R8, .A)
 	case 0x60:
-		bit_u3(4, .R8, .B, operand.(u8))
+		bit_u3(4, .R8, .B)
 	case 0x61:
-		bit_u3(4, .R8, .C, operand.(u8))
+		bit_u3(4, .R8, .C)
 	case 0x62:
-		bit_u3(4, .R8, .D, operand.(u8))
+		bit_u3(4, .R8, .D)
 	case 0x63:
-		bit_u3(4, .R8, .E, operand.(u8))
+		bit_u3(4, .R8, .E)
 	case 0x64:
-		bit_u3(4, .R8, .H, operand.(u8))
+		bit_u3(4, .R8, .H)
 	case 0x65:
-		bit_u3(4, .R8, .L, operand.(u8))
+		bit_u3(4, .R8, .L)
 	case 0x66:
-		bit_u3(4, .HL, .NONE, operand.(u8))
+		bit_u3(4, .HL, .NONE)
 	case 0x67:
-		bit_u3(4, .R8, .A, operand.(u8))
+		bit_u3(4, .R8, .A)
 	case 0x68:
-		bit_u3(5, .R8, .B, operand.(u8))
+		bit_u3(5, .R8, .B)
 	case 0x69:
-		bit_u3(5, .R8, .C, operand.(u8))
+		bit_u3(5, .R8, .C)
 	case 0x6a:
-		bit_u3(5, .R8, .D, operand.(u8))
+		bit_u3(5, .R8, .D)
 	case 0x6b:
-		bit_u3(5, .R8, .E, operand.(u8))
+		bit_u3(5, .R8, .E)
 	case 0x6c:
-		bit_u3(5, .R8, .H, operand.(u8))
+		bit_u3(5, .R8, .H)
 	case 0x6d:
-		bit_u3(5, .R8, .L, operand.(u8))
+		bit_u3(5, .R8, .L)
 	case 0x6e:
-		bit_u3(5, .HL, .NONE, operand.(u8))
+		bit_u3(5, .HL, .NONE)
 	case 0x6f:
-		bit_u3(5, .R8, .A, operand.(u8))
+		bit_u3(5, .R8, .A)
 	case 0x70:
-		bit_u3(6, .R8, .B, operand.(u8))
+		bit_u3(6, .R8, .B)
 	case 0x71:
-		bit_u3(6, .R8, .C, operand.(u8))
+		bit_u3(6, .R8, .C)
 	case 0x72:
-		bit_u3(6, .R8, .D, operand.(u8))
+		bit_u3(6, .R8, .D)
 	case 0x73:
-		bit_u3(6, .R8, .E, operand.(u8))
+		bit_u3(6, .R8, .E)
 	case 0x74:
-		bit_u3(6, .R8, .H, operand.(u8))
+		bit_u3(6, .R8, .H)
 	case 0x75:
-		bit_u3(6, .R8, .L, operand.(u8))
+		bit_u3(6, .R8, .L)
 	case 0x76:
-		bit_u3(6, .HL, .NONE, operand.(u8))
+		bit_u3(6, .HL, .NONE)
 	case 0x77:
-		bit_u3(6, .R8, .A, operand.(u8))
+		bit_u3(6, .R8, .A)
 	case 0x78:
-		bit_u3(7, .R8, .B, operand.(u8))
+		bit_u3(7, .R8, .B)
 	case 0x79:
-		bit_u3(7, .R8, .C, operand.(u8))
+		bit_u3(7, .R8, .C)
 	case 0x7a:
-		bit_u3(7, .R8, .D, operand.(u8))
+		bit_u3(7, .R8, .D)
 	case 0x7b:
-		bit_u3(7, .R8, .E, operand.(u8))
+		bit_u3(7, .R8, .E)
 	case 0x7c:
-		bit_u3(7, .R8, .H, operand.(u8))
+		bit_u3(7, .R8, .H)
 	case 0x7d:
-		bit_u3(7, .R8, .L, operand.(u8))
+		bit_u3(7, .R8, .L)
 	case 0x7e:
-		bit_u3(7, .HL, .NONE, operand.(u8))
+		bit_u3(7, .HL, .NONE)
 	case 0x7f:
-		bit_u3(7, .R8, .A, operand.(u8))
+		bit_u3(7, .R8, .A)
 	case 0x80:
 		res_r8(0, .B)
 	case 0x81:
@@ -1322,8 +1313,8 @@ and_A :: proc($mode: U8_ARG_MODE, $r8: R8, operand: u8) {
 }
 
 
-bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8, operand: u8) where (0 <= bit && bit <= 7) {
-	mem := get_argument_u8(mode, r8, operand)
+bit_u3 :: proc($bit: u8, $mode: U8_ARG_MODE, $r8: R8) where (0 <= bit && bit <= 7 && mode != .N8) {
+	mem := get_argument_u8(mode, r8, 0)
 
 	toggle_flag((mem & bit) == 0, .Z)
 	cpu.registers.F -= {.N}
@@ -1453,7 +1444,7 @@ inc16 :: proc($r16: R16) {
 jp_cc :: proc($cc: ConditionCode, $mode: enum u8 {
 		HL,
 		N16,
-	}, operand: u8) {
+	}, operand: Operand) {
 	if !is_condition_valid(cc) {
 		cpu.ticks += 12
 		return
@@ -1462,7 +1453,7 @@ jp_cc :: proc($cc: ConditionCode, $mode: enum u8 {
 	when mode == .HL {
 		cpu.PC = Address(cpu.registers.HL)
 	} else when mode == .N16 {
-		cpu.PC = Address(operand)
+		cpu.PC = Address(operand.(u16))
 	}
 
 	cpu.ticks += 16
@@ -1471,11 +1462,12 @@ jp_cc :: proc($cc: ConditionCode, $mode: enum u8 {
 jp :: proc($mode: enum u8 {
 		HL,
 		N16,
-	}, operand: u16) {
+	}, operand: Operand) {
+
 	when mode == .HL {
 		cpu.PC = Address(cpu.registers.HL)
 	} else when mode == .N16 {
-		cpu.PC = Address(operand)
+		cpu.PC = Address(operand.(u16))
 	}
 }
 
@@ -1647,7 +1639,7 @@ reti :: proc() {
 
 rl_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
-	rotate_left_includes_carry(reg)
+	rl(reg)
 
 	toggle_flag(reg^ == 0, .Z)
 	cpu.registers.F -= {.N, .H}
@@ -1656,7 +1648,7 @@ rl_r8 :: proc($r8: R8) {
 rl_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
 
-	rotate_left_includes_carry(&mem)
+	rl(&mem)
 
 	write_u8(Address(cpu.registers.HL), mem)
 
@@ -1665,14 +1657,14 @@ rl_HL :: proc() {
 }
 
 rla :: proc() {
-	rotate_left_includes_carry(&cpu.registers.A)
+	rl(&cpu.registers.A)
 
 	cpu.registers.F -= {.N, .H, .Z}
 }
 
 rlc_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
-	rotate_left(reg)
+	rlc(reg)
 
 	toggle_flag(reg^ >> 7 == 1, .C)
 	toggle_flag(reg^ == 0, .Z)
@@ -1681,7 +1673,7 @@ rlc_r8 :: proc($r8: R8) {
 
 rlc_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
-	rotate_left(&mem)
+	rlc(&mem)
 	write_u8(Address(cpu.registers.HL), mem)
 
 	toggle_flag(mem >> 7 == 1, .C)
@@ -1690,7 +1682,7 @@ rlc_HL :: proc() {
 }
 
 rlca :: proc() {
-	rotate_left(&cpu.registers.A)
+	rlc(&cpu.registers.A)
 
 	toggle_flag(cpu.registers.A >> 7 == 1, .C)
 	cpu.registers.F -= {.N, .H, .Z}
@@ -1699,7 +1691,7 @@ rlca :: proc() {
 
 rr_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
-	rotate_right_includes_carry(reg)
+	rr(reg)
 
 	toggle_flag(reg^ == 0, .Z)
 	cpu.registers.F -= {.N, .H}
@@ -1707,7 +1699,7 @@ rr_r8 :: proc($r8: R8) {
 
 rr_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
-	rotate_left_includes_carry(&mem)
+	rr(&mem)
 
 	write_u8(Address(cpu.registers.HL), mem)
 
@@ -1716,14 +1708,18 @@ rr_HL :: proc() {
 }
 
 rra :: proc() {
-	rotate_right_includes_carry(&cpu.registers.A)
+	carry := u8(.C in cpu.registers.F) << 7
+	toggle_flag(cpu.registers.A & 0x1 != 1, .C)
+
+	cpu.registers.A >>= 1
+	cpu.registers.A += carry
 
 	cpu.registers.F -= {.N, .H, .Z}
 }
 
 rrc_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
-	rotate_right(reg)
+	rrc(reg)
 
 	toggle_flag(reg^ & 0x1 == 1, .C)
 	toggle_flag(reg^ == 0, .Z)
@@ -1732,19 +1728,23 @@ rrc_r8 :: proc($r8: R8) {
 
 rrc_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
-	rotate_right(&mem)
+	rrc(&mem)
 
 	write_u8(Address(cpu.registers.HL), mem)
 
-	toggle_flag(mem & 0x1 == 1, .C)
 	toggle_flag(mem == 0, .Z)
 	cpu.registers.F -= {.N, .H}
 }
 
 rrca :: proc() {
-	rotate_right(&cpu.registers.A)
+	carry := cpu.registers.A & 0x1
+	toggle_flag(carry != 0, .C)
 
-	toggle_flag(cpu.registers.A & 0x1 == 1, .C)
+	cpu.registers.A >>= 1
+	if (carry != 0) {
+		cpu.registers.A |= 0x80
+	}
+
 	cpu.registers.F -= {.N, .H, .Z}
 }
 
@@ -1805,7 +1805,8 @@ sla_HL :: proc() {
 sra_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
 
-	toggle_flag(reg^ & 0x80 == 1, .C)
+	toggle_flag(reg^ & 0x01 != 0, .C)
+
 	reg^ = (reg^ & 0x80) | (reg^ >> 1)
 
 	cpu.registers.F -= {.N, .H}
@@ -1815,19 +1816,18 @@ sra_r8 :: proc($r8: R8) {
 sra_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
 
+	toggle_flag(mem & 0x01 != 0, .C)
 	write_u8(Address(cpu.registers.HL), (mem & 0x80) | (mem >> 1))
 
 	cpu.registers.F -= {.N, .H}
 	toggle_flag(mem == 0, .Z)
-	toggle_flag(mem & 0x80 == 1, .C)
 }
-
 
 srl_r8 :: proc($r8: R8) {
 	reg := get_reg8(r8)
 
-	toggle_flag(reg^ & 0x80 == 1, .C)
-	reg^ = (reg^ >> 1)
+	toggle_flag(reg^ & 0x01 != 0, .C)
+	reg^ >>= 1
 
 	cpu.registers.F -= {.N, .H}
 	toggle_flag(reg^ == 0, .Z)
@@ -1836,10 +1836,11 @@ srl_r8 :: proc($r8: R8) {
 srl_HL :: proc() {
 	mem := read_u8(Address(cpu.registers.HL))
 
+	toggle_flag(mem & 0x01 != 0, .C)
+
 	write_u8(Address(cpu.registers.HL), (mem >> 1))
 
 	cpu.registers.F -= {.N, .H}
-	toggle_flag(mem & 0x80 == 1, .C)
 	toggle_flag(mem == 0, .Z)
 }
 

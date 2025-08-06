@@ -386,39 +386,43 @@ is_half_carried_sub16 :: proc(a, b: u16) -> bool {
 	return (((a & 0xFFF) - (b & 0xFFF)) & 0x1000) == 0x1000
 }
 
-rotate_left_includes_carry :: proc(val: ^u8) {
-	flags := &cpu.registers.F
-	msb := val^ >> 7
-	c := u8(.C in flags^)
-	val^ = val^ << 1 + c
-	flags^ = flags^ + {.C} if msb == 1 else flags^ - {.C}
+rlc :: proc(value: ^u8) {
+	carry := (value^ & 0x80) >> 7
+
+	toggle_flag(value^ & 0x80 != 0, .C)
+
+	value^ <<= 1
+	value^ += carry
 }
 
-rotate_left :: proc(val: ^u8) {
-	msb := val^ >> 7
-	val^ = val^ << 1 + msb
+rl :: proc(value: ^u8) {
+	carry := u8(.C in cpu.registers.F)
+
+	toggle_flag(value^ & 0x80 != 0, .C)
+
+	value^ <<= 1
+	value^ += carry
 }
 
-rotate_right_includes_carry :: proc(val: ^u8) {
-	flags := &cpu.registers.F
-	lsb := val^ & 1
-	c := u8(.C in flags)
-	val^ = val^ >> 1
-	if c == 1 {
-		val^ += 0x80
+rrc :: proc(val: ^u8) {
+	carry := val^ & 0x1
+	val^ >>= 1
+
+	if carry != 0 {
+		val^ |= 0x80
 	}
-	flags^ = flags^ + {.C} if lsb == 1 else flags^ - {.C}
+
+	toggle_flag(carry != 0, .C)
 }
 
+rr :: proc(value: ^u8) {
+	carry := u8(.C in cpu.registers.F)
 
-rotate_right :: proc(val: ^u8) {
-	lsb := val^ & 1
-	val^ = val^ >> 1
-	if lsb == 1 {
-		val^ += 0x80
-	}
+	toggle_flag(value^ & 0x80 != 0, .C)
+
+	value^ <<= 1
+	value^ += carry
 }
-
 
 toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
 	if cond {
@@ -427,7 +431,6 @@ toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
 		cpu.registers.F -= {flag}
 	}
 }
-
 
 is_condition_valid :: proc($condtion: ConditionCode) -> bool {
 	switch condtion {
@@ -491,7 +494,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case is_address_in_mm(address, MM.IO):
 		return io[address - MM_Start[MM.IO]]
 	case:
-		log.fatal("Reading Adress: 0x%04X is invalid;", address)
+		log.fatalf("Reading Adress: 0x%04X is invalid;", address)
 		return 0
 	}
 }
@@ -555,14 +558,14 @@ write_u16 :: proc(address: Address, value: u16) {
 	write_u8(address + 1, u8((value & 0xFF00) >> 8))
 }
 
-push_sp :: proc(value: u16) {
+push_sp :: proc(value: u16, location := #caller_location) {
 	cpu.SP -= 2
 	write_u16(cpu.SP, value)
-	log.warnf("Push SP($%04X): 0x%04X", cpu.SP, value)
+	fmt.printfln("[%v] Push SP($%04X): 0x%04X", location, cpu.SP, value)
 }
-pop_sp :: proc() -> u16 {
+pop_sp :: proc(location := #caller_location) -> u16 {
 	value := read_u16(cpu.SP)
-	log.warnf("Pop SP($%04X): 0x%04X", cpu.SP, value)
+	fmt.printfln("[%v] Pop SP($%04X): 0x%04X", location, cpu.SP, value)
 	cpu.SP += 2
 	return value
 }
