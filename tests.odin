@@ -1,6 +1,7 @@
 #+feature dynamic-literals
 package main
 
+import "core:log"
 import "core:testing"
 
 
@@ -77,6 +78,9 @@ test_half_rotate_right_carry :: proc(t: ^testing.T) {
 test_u16_to_i8 :: proc(t: ^testing.T) {
 	u: u8 = 0x80
 	i: i16 = 0xFF
+
+	log.infof("%b", u)
+	log.info(u16(i - i16(u)))
 }
 
 
@@ -106,6 +110,7 @@ t_err :: proc() -> (ok: bool) {
 
 @(test)
 test_t :: proc(t: ^testing.T) {
+	log.infof("out: %v", t_err())
 	testing.expect(t, t_err() == false)
 
 }
@@ -123,11 +128,13 @@ test_switch_scope :: proc(t: ^testing.T) {
 	// 	num := 0
 	// }
 
+	log.info(num)
 	switch e {
 	case .A:
 		@(static) i := 0
 	case .B:
 		i := 0
+		log.info(i)
 	case .C:
 	}
 }
@@ -147,5 +154,9 @@ T_Struct :: struct {
 testing_using :: proc(t: ^testing.T) {
 	t: T_Struct
 	t.AF = 0xFFAA
+
+	log.debugf("%04X", t.AF)
+	log.debugf("%04X", t.F)
+	log.debugf("%04X", t.A)
 }
 
