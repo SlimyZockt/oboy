@@ -22,8 +22,6 @@ jobs:
           make
           echo "$(pwd)" >> "$GITHUB_PATH"
           ./odin report
-        with:
-          release: nightly
       - name: Run test
         run: ./odin test .
         timeout-minutes: 1
