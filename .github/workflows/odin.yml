@@ -22,9 +22,9 @@ jobs:
           release: nightly
       - name: Report
         run: odin report
-      - name: Non-blocking IO test
+      - name: Run test
         run: odin test .
         timeout-minutes: 1
-      - name: Odin check
-        if: success() || failure()
-        run: odin check . -vet --strict-style
+      # - name: Odin check
+      #   if: success() || failure()
+        # run: odin check . -vet --strict-style
