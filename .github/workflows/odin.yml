@@ -22,5 +22,5 @@ jobs:
           make
           ./odin report
           cd ..
-          .Odin/odin test .
+          ./Odin/odin test .
         # run: odin check . -vet --strict-style
