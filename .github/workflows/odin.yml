@@ -20,7 +20,7 @@ jobs:
           git clone https://github.com/odin-lang/Odin.git --depth 1 --single-branch --branch=master
           cd Odin
           make
-          echo "$(pwd)" >> "$GITHUB_PATH"
           ./odin report
-          ./odin test .
+          cd ..
+          .Odin/odin test .
         # run: odin check . -vet --strict-style
