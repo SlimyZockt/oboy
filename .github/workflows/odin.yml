@@ -15,16 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Odin
+      - name: Set up Odin & Test
         run: |
           git clone https://github.com/odin-lang/Odin.git --depth 1 --single-branch --branch=master
           cd Odin
           make
           echo "$(pwd)" >> "$GITHUB_PATH"
           ./odin report
-      - name: Run test
-        run: ./odin test .
-        timeout-minutes: 1
-      # - name: Odin check
-      #   if: success() || failure()
+          ./odin test .
         # run: odin check . -vet --strict-style
