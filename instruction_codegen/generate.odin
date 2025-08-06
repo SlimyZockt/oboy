@@ -5,7 +5,6 @@ import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:slice"
-import "core:strings"
 
 OUTPUT_FILE :: "instructions/instruction_definitons.odin"
 OPCODE_JSON :: #load("./opcodes.json")
