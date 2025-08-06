@@ -36,9 +36,10 @@ TileData :: distinct [16]u8
 Color_Index :: u8
 Tile :: distinct [64]Color_Index
 Object :: struct {
+	y:          u8,
+	x:          u8,
 	tile_index: u8,
 	flags:      bit_set[ObjectFlags;u8],
-	pos:        Vec2,
 }
 
 
@@ -111,8 +112,8 @@ update_tile :: proc(address: Address) {
 	#unroll for x in 0 ..< 8 {
 		bit_index: u8 = 1 << (7 - u8(x))
 
-		msb: u8 = (vram[address] & bit_index != 0) ? 1 : 0
-		lsb: u8 = (vram[address + 1] & bit_index != 0) ? 2 : 0
+		msb: u8 = (memory.vram[address] & bit_index != 0) ? 1 : 0
+		lsb: u8 = (memory.vram[address + 1] & bit_index != 0) ? 2 : 0
 
 		// fmt.printfln("Tile Data %v: %v ", u16(y * 8) + u16(x), (msb + lsb))
 		tiles[tile][u16(y * 8) + u16(x)] = (msb + lsb)
@@ -124,113 +125,91 @@ update_tile :: proc(address: Address) {
 draw_scanline :: proc(line: u8) {
 	assert(0 <= line && line < SCANLINES)
 
-	// if .LCD_PPU_Enable in gpu.controll do return
+	if .LCD_PPU_Enable not_in gpu.controll do return
+
+	// gpu.controll = {.Window_Enable}
+	scanline_row: [160]Color_Index
+
+	if .Background_Window_Enable in gpu.controll { 	// draw bg and win
+		bg_tilemap: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
+		bg_tilemap += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
 
-	{ 	// get_tiles
-		tile_map_offset: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
-		tile_map_offset += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
-
+		win_tilemap: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
 
 		line_offset := u16(gpu.scroll_x) >> 3
 
-		y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
-		x := gpu.scroll_x & 0b0000_0111
+		bg_y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
+		bg_x := gpu.scroll_x & 0b0000_0111
 
-		tile_index := vram[tile_map_offset + line_offset]
-		tile_data_offset: u16 = .Tiledata_Offset in gpu.controll ? 0x0000 : 0x0800
+		tile_data_offset: u8 = .Tiledata_Offset in gpu.controll ? 0 : 128
+		bg_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
+
+
+		win_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
 
 		pixel_offset := int(gpu.scanline) * SCREEN_WIDTH
 
+		for x in 0 ..< 160 {
+			color := tiles[bg_tile_index][bg_y * 8 + bg_x]
 
-		for _ in 0 ..< 160 {
-			color := tiles[tile_index][y * 8 + x]
+			scanline_row[x] = color
 
 			framebuffer[pixel_offset] = bg_palette[color]
 
 			pixel_offset += 1
-			x += 1
-			if (x == 8) {
-				x = 0
+			bg_x += 1
+			if (bg_x == 8) {
+				bg_x = 0
 				line_offset = (line_offset + 1) & 31
-				tile_index = vram[tile_map_offset + line_offset]
+				tile_data_offset = .Tiledata_Offset in gpu.controll ? 0 : 128
+				bg_tile_index = memory.vram[bg_tilemap + line_offset] + tile_data_offset
 			}
+
+			if .Window_Enable not_in gpu.controll do continue
+		}
+	}
+
+	// if .OBJ_Enable not_in gpu.controll do return
+	for i in 0 ..< 40 {
+		id := i * 4
+		object := Object {
+			memory.oam[id],
+			memory.oam[id + 1],
+			memory.oam[id + 2],
+			transmute(bit_set[ObjectFlags;u8])memory.oam[id + 3],
 		}
 
 
+		sp_x := object.x - 8
+		sp_y := object.y - 16
+
+		if !(sp_y <= line && (sp_y + 8) > line) do continue
+
+		offset := (u32(line) * SCREEN_WIDTH) + u32(sp_x)
+		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
+
+
+		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
+
+		for x in 0 ..< 8 {
+			can_draw := (sp_x + u8(x)) >= 0 && (sp_x + u8(x)) < SCREEN_WIDTH
+			can_draw &&= (.Priority not_in object.flags || scanline_row[sp_x + u8(x)] == 0)
+			//
+			if !can_draw do continue
+
+			fmt.printfln("OBJ: %v | %v | %v", object, (sp_x + u8(x)), (sp_x + u8(x)))
+			tile := tiles[object.tile_index]
+
+			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
+
+			if color == 0 do continue
+
+			framebuffer[offset] = palette[color]
+			offset += 1
+		}
 	}
 
-	// horizontal_offset: Address = (((Address(line) + Address(gpu.scroll_y)) & 255) >> 3) << 5
-	// log.debugf("OFFSET: 0x%04X", horizontal_offset)
-	//
-	// is_drawing_allowed := .Background_Window_Enable in gpu.controll
-	// if is_drawing_allowed {
-	// 	// win_tile_map_area := 0x9C00 if .Win_Tile_Map_Area in gpu.lcdc else 0x9800
-	// 	bg_offset: Address = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
-	// 	bg_offset += horizontal_offset
-	// 	log.debugf("BACKGROUND ADDRESS: 0x%04X", bg_offset)
-	// 	bg_tile_ids := vram[bg_offset:][:SCREEN_WIDTH >> 3]
-	//
-	// 	for id, x in bg_tile_ids {
-	// 		tile := get_tile(id, .Tiledata_Offset in gpu.controll)
-	//
-	// 		display_pos := Vec2{u8((id << 5) + u8(x)), line}
-	//
-	// 		insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
-	// 	}
-	//
-	// 	log.warn(bg_tile_ids)
-	// }
-	//
-	// if .OBJ_Enable in gpu.controll {
-	// 	objects: [10]Object
-	// 	j := 0
-	// 	for i in 0 ..< 40 {
-	// 		id := i * 4
-	//
-	// 		// log.debugf("OAM ADDRESS: 0x%04X", id)
-	//
-	// 		if oam[id] != line do continue
-	//
-	// 		object := &objects[j]
-	//
-	// 		object.pos.y = oam[id]
-	// 		object.pos.x = oam[id + 1]
-	// 		object.tile_index = oam[id + 2]
-	// 		object.flags = transmute(bit_set[ObjectFlags;u8])oam[id + 3]
-	//
-	// 		tile := get_tile(objects[j].tile_index, false)
-	//
-	// 		palette := .DMG_Pallet in object.flags ? sprite_palettes[1] : sprite_palettes[0]
-	//
-	// 		insert_tile_in_framebuffer(&framebuffer, object.pos, tile, palette)
-	//
-	// 		if j == 9 do break
-	// 		j += 1
-	// 	}
-	//
-	// }
-	//
-	// if is_drawing_allowed || .Window_Enable in gpu.controll {
-	// 	win_offset: Address = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
-	// 	win_offset += horizontal_offset
-	//
-	// 	log.debugf("WINDOW ADDRESS: 0x%04X", win_offset)
-	// 	win_tile_ids := vram[win_offset:][:SCREEN_WIDTH >> 3]
-	//
-	// 	for id, x in win_tile_ids {
-	// 		tile := get_tile(id, .Tiledata_Offset in gpu.controll)
-	//
-	// 		display_pos := Vec2{u8((id << 5) + u8(x)), line}
-	//
-	// 		insert_tile_in_framebuffer(&framebuffer, display_pos, tile, bg_palette)
-	// 	}
-	//
-	// 	log.warn(win_tile_ids)
-	// }
-	//
-	//
-	// return true
 }
 
 

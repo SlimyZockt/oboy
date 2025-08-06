@@ -461,15 +461,15 @@ copy :: proc(dest: Address, source: Address, len: u64) {
 read_u8 :: proc(address: Address) -> u8 {
 	switch {
 	case is_address_in_mm(address, MM.Rom) || is_address_in_mm(address, MM.Switch_Rom):
-		return rom[address]
+		return memory.rom[address]
 	case is_address_in_mm(address, MM.External_Ram):
-		return extern_ram[address - MM_Start[MM.External_Ram]]
+		return memory.extern_ram[address - MM_Start[MM.External_Ram]]
 	case is_address_in_mm(address, MM.Vram):
-		return vram[address - MM_Start[MM.Vram]]
+		return memory.vram[address - MM_Start[MM.Vram]]
 	case is_address_in_mm(address, MM.Wram):
-		return wram[address - MM_Start[MM.Wram]]
+		return memory.wram[address - MM_Start[MM.Wram]]
 	case is_address_in_mm(address, MM.OAM):
-		return oam[address - MM_Start[MM.OAM]]
+		return memory.oam[address - MM_Start[MM.OAM]]
 	case address == 0xFF04:
 		// DIV
 		// Should return a div timer, but a random number works just as well for Tetris
@@ -487,12 +487,16 @@ read_u8 :: proc(address: Address) -> u8 {
 	// return 0
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
+	case address == 0xFF4A:
+		return gpu.win_y
+	case address == 0xFF4B:
+		return gpu.win_x
 	case address == 0xFFFF:
 		return transmute(u8)cpu.interrupt.enable
 	case is_address_in_mm(address, MM.Hram):
-		return hram[address - MM_Start[MM.Hram]]
+		return memory.hram[address - MM_Start[MM.Hram]]
 	case is_address_in_mm(address, MM.IO):
-		return io[address - MM_Start[MM.IO]]
+		return memory.io[address - MM_Start[MM.IO]]
 	case:
 		log.fatalf("Reading Adress: 0x%04X is invalid;", address)
 		return 0
@@ -508,19 +512,19 @@ read_u16 :: proc(address: Address) -> u16 {
 write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	switch {
 	case is_address_in_mm(address, MM.External_Ram):
-		extern_ram[address - MM_Start[MM.External_Ram]] = value
+		memory.extern_ram[address - MM_Start[MM.External_Ram]] = value
 	case is_address_in_mm(address, MM.Vram):
 		fmt.printfln("[%v] VRAM($%04X): 0x%02X", location, address, value)
-		vram[address - MM_Start[MM.Vram]] = value
+		memory.vram[address - MM_Start[MM.Vram]] = value
 		if address <= 0x97FF {
 			update_tile(address)
 		}
 	case is_address_in_mm(address, MM.Wram):
-		wram[address - MM_Start[MM.Wram]] = value
+		memory.wram[address - MM_Start[MM.Wram]] = value
 	case is_address_in_mm(address, MM.OAM):
-		oam[address - MM_Start[MM.OAM]] = value
+		memory.oam[address - MM_Start[MM.OAM]] = value
 	case is_address_in_mm(address, MM.Hram):
-		hram[address - MM_Start[MM.Hram]] = value
+		memory.hram[address - MM_Start[MM.Hram]] = value
 	case address == 0xFF40:
 		gpu.controll = transmute(bit_set[LCD_Control;u8])value
 	case address == 0xFF42:
@@ -541,12 +545,16 @@ write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 		for &color, i in sprite_palettes[1] {
 			color = DEFAULT_PALETTE[(value >> (u8(i) * 2)) & 3]
 		}
+	case address == 0xFF4A:
+		gpu.win_y = value
+	case address == 0xFF4B:
+		gpu.win_x = value
 	case address == 0xFFFF:
 		cpu.interrupt.enable = transmute(bit_set[Interrupt;u8])value
 	case address == 0xFF0F:
 		cpu.interrupt.flags = transmute(bit_set[Interrupt;u8])value
 	case is_address_in_mm(address, MM.IO):
-		io[address - MM_Start[MM.IO]] = value
+		memory.io[address - MM_Start[MM.IO]] = value
 	case:
 		log.infof("Writing %v Adress: 0x%04X is invalid", value, address)
 	}

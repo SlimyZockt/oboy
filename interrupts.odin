@@ -11,10 +11,8 @@ interrupt_step :: proc() {
 	if .VBlank in fire {
 		cpu.interrupt.flags -= {.VBlank}
 
-		fmt.printfln("VBlank")
 		@(static) start_time: f64
 		end_time := rl.GetTime()
-		//
 		if (start_time - end_time < 1 / 60) {
 			rl.WaitTime(1 / 60)
 		}

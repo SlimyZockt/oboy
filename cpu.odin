@@ -67,7 +67,7 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 
 	cpu.joypad = {.B_Left, .A_Right, .Select_Up, .Start_Down, .Select_DPad, .Select_Buttons}
 
-	io = io_reset
+	memory.io = io_reset
 
 	for &pixel in framebuffer {
 		pixel = Color{255, 255, 255}
@@ -577,7 +577,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xc1:
 		pop_r16(.BC)
 	case 0xc2:
-		jp_cc(.NZ, .N16, operand.(u8))
+		jp_cc(.NZ, .N16, operand.(u16))
 	case 0xc3:
 		jp(.N16, operand.(u16))
 	case 0xc4:
@@ -593,7 +593,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xc9:
 		ret()
 	case 0xca:
-		jp_cc(.Z, .N16, operand)
+		jp_cc(.Z, .N16, operand.(u16))
 	case 0xcb:
 		execute_prefixed_instruction(operand.(u8))
 	case 0xcc:
@@ -609,7 +609,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xd1:
 		pop_r16(.DE)
 	case 0xd2:
-		jp_cc(.NC, .N16, operand.(u8))
+		jp_cc(.NC, .N16, operand.(u16))
 	case 0xd3:
 	case 0xd4:
 		call_cc_n16(.NC, operand.(u16))
@@ -624,7 +624,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xd9:
 		reti()
 	case 0xda:
-		jp_cc(.C, .N16, operand.(u8))
+		jp_cc(.C, .N16, operand.(u16))
 	case 0xdb:
 	case 0xdc:
 		call_cc_n16(.C, operand.(u16))
@@ -1444,7 +1444,7 @@ inc16 :: proc($r16: R16) {
 jp_cc :: proc($cc: ConditionCode, $mode: enum u8 {
 		HL,
 		N16,
-	}, operand: Operand) {
+	}, operand: Maybe(u16)) {
 	if !is_condition_valid(cc) {
 		cpu.ticks += 12
 		return

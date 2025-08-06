@@ -118,16 +118,10 @@ Gpu :: struct {
 	controll: bit_set[LCD_Control;u8],
 	scroll_x: u8,
 	scroll_y: u8,
+	win_x:    u8,
+	win_y:    u8,
 	scanline: u8,
 	dots:     u64,
-}
-
-Data_ID :: u8
-Tile_Map :: [1024 * 2]Data_ID
-
-Gameboy :: struct {
-	cpu: Cpu,
-	gpu: Gpu,
 }
 
 Flags :: enum {
@@ -154,18 +148,21 @@ debug_data: [dynamic]Instruction_Debug_Data
 
 g_ctx: runtime.Context
 
+mutex: sync.Mutex
 cpu: Cpu
 gpu: Gpu
+memory: Memory
 
-mutex: sync.Mutex
+Memory :: struct {
+	rom:        [0x8000]u8,
+	extern_ram: [0x2000]u8,
+	vram:       [0x2000]u8,
+	oam:        [0x00A0]u8,
+	wram:       [0x2000]u8,
+	hram:       [0x80]u8,
+	io:         [0x100]u8,
+}
 
-rom: [0x8000]u8
-extern_ram: [0x2000]u8
-vram: [0x2000]u8
-oam: [0x00A0]u8
-wram: [0x2000]u8
-hram: [0x80]u8
-io: [0x100]u8
 
 debug_arena: vmem.Arena
 
@@ -251,11 +248,11 @@ print_debug_data :: proc() {
 	}
 
 	os.write_entire_file(DEBUG_FOLDER + "/trace_log.csv", transmute([]u8)trace_log[:])
-	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", vram[:])
-	os.write_entire_file(DEBUG_FOLDER + "/hram.bin", hram[:])
-	os.write_entire_file(DEBUG_FOLDER + "/oam.bin", oam[:])
-	os.write_entire_file(DEBUG_FOLDER + "/io.bin", io[:])
-	os.write_entire_file(DEBUG_FOLDER + "/wram.bin", wram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/vram.bin", memory.vram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/hram.bin", memory.hram[:])
+	os.write_entire_file(DEBUG_FOLDER + "/oam.bin", memory.oam[:])
+	os.write_entire_file(DEBUG_FOLDER + "/io.bin", memory.io[:])
+	os.write_entire_file(DEBUG_FOLDER + "/wram.bin", memory.wram[:])
 
 	img, ok := image.pixels_to_image(
 		transmute([]image.RGB_Pixel)framebuffer[:],
@@ -352,25 +349,29 @@ main :: proc() {
 
 
 		rom_path := os.args[1]
-		cartridge, ok := os.read_entire_file_from_filename(rom_path)
-		if !ok {
+		rom_file, err := os.open(rom_path)
+		if err != nil {
 			log.error("Can not read file")
 			return
 		}
-		defer delete(cartridge)
+		defer os.close(rom_file)
 
-		copy_slice(rom[:], cartridge[:])
-		assert(slice.equal(rom[:0x8000], cartridge[:0x8000]))
+		bytes_read, read_err := os.read(rom_file, memory.rom[:])
+		if err != nil {
+			log.error("Can not read file")
+			return
+		}
+		assert(0x8000 == bytes_read)
 
 	}
 
 	load_boot_rom(&cpu)
 
 
-	t := thread.create_and_start_with_poly_data3(&framebuffer, &gpu.draw, &mutex, render)
+	t := thread.create_and_start_with_poly_data4(&framebuffer, &gpu.draw, &cpu, &mutex, render)
 	assert(t != nil)
 
-	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, mutex: ^sync.Mutex) {
+	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, cpu: ^Cpu, mutex: ^sync.Mutex) {
 		fmt.println("starting Raylib")
 		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
 		defer rl.CloseWindow()
@@ -394,13 +395,34 @@ main :: proc() {
 			rl.DrawTexture(texture, 0, 0, rl.WHITE)
 
 			rl.ClearBackground(rl.WHITE)
-			rl.DrawFPS(10, 10)
 			rl.EndDrawing()
 		}
-		// fmt.println("closing Raylib")
+
+		fmt.println("closing Raylib")
 	}
 
 	for {
+		cpu.joypad = {.B_Left, .A_Right, .Start_Down, .Select_Up}
+
+		switch {
+		case .Select_DPad not_in cpu.joypad:
+			if rl.IsKeyDown(.A) do cpu.joypad -= {.B_Left}
+			if rl.IsKeyDown(.D) do cpu.joypad -= {.A_Right}
+			if rl.IsKeyDown(.W) do cpu.joypad -= {.Select_Up}
+			if rl.IsKeyDown(.S) do cpu.joypad -= {.Start_Down}
+		case .Select_Buttons not_in cpu.joypad:
+			if rl.IsKeyDown(.Q) do cpu.joypad -= {.B_Left}
+			if rl.IsKeyDown(.E) do cpu.joypad -= {.A_Right}
+			if rl.IsKeyDown(.ENTER) do cpu.joypad -= {.Select_Up}
+			if rl.IsKeyDown(.SPACE) do cpu.joypad -= {.Start_Down}
+		}
+
+
+		// if transmute(u8)cpu.joypad & 0x0F != 0 {
+		// 	cpu.interrupt.flags += {.Joypad}
+		// }
+
+
 		step_cpu()
 		step_gpu()
 		interrupt_step()
