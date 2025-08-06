@@ -693,7 +693,7 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	case 0xf9:
 		ld_SP_HL()
 	case 0xfa:
-		ld_sp_n16(operand.(u16))
+		ld_A_n16(operand.(u16))
 	case 0xfb:
 	// EI
 	case 0xfc:
