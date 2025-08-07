@@ -7,9 +7,9 @@ import "core:fmt"
 import "core:image"
 import "core:image/bmp"
 import "core:log"
+import "core:math"
 import "core:mem"
 import "core:os"
-import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -89,8 +89,6 @@ Joypad :: enum u8 {
 	Start_Down,
 	Select_DPad,
 	Select_Buttons,
-	_,
-	_,
 }
 
 LCD_Control :: enum u8 {
@@ -357,7 +355,7 @@ main :: proc() {
 		defer os.close(rom_file)
 
 		bytes_read, read_err := os.read(rom_file, memory.rom[:])
-		if err != nil {
+		if read_err != nil {
 			log.error("Can not read file")
 			return
 		}
@@ -373,7 +371,9 @@ main :: proc() {
 
 	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, cpu: ^Cpu, mutex: ^sync.Mutex) {
 		fmt.println("starting Raylib")
+		rl.SetConfigFlags({.WINDOW_RESIZABLE, .WINDOW_MAXIMIZED, .BORDERLESS_WINDOWED_MODE})
 		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
+		rl.SetWindowMinSize(SCREEN_WIDTH, SCREEN_HEIGHT)
 		defer rl.CloseWindow()
 
 		img := rl.Image{nil, SCREEN_WIDTH, SCREEN_HEIGHT, 1, .UNCOMPRESSED_R8G8B8}
@@ -392,7 +392,22 @@ main :: proc() {
 
 			rl.BeginDrawing()
 
-			rl.DrawTexture(texture, 0, 0, rl.WHITE)
+			scale: f32 = math.min(
+				f32(rl.GetScreenWidth()) / SCREEN_WIDTH,
+				f32(rl.GetScreenHeight()) / SCREEN_HEIGHT,
+			)
+			offset_x := (f32(rl.GetScreenWidth()) - (SCREEN_WIDTH * scale)) / 2
+			offset_y := (f32(rl.GetScreenHeight()) - (SCREEN_HEIGHT * scale)) / 2
+
+
+			rl.DrawTexturePro(
+				texture,
+				{0, 0, SCREEN_WIDTH, SCREEN_HEIGHT},
+				{offset_x, offset_y, SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale},
+				{0, 0},
+				0,
+				rl.WHITE,
+			)
 
 			rl.ClearBackground(rl.WHITE)
 			rl.EndDrawing()
@@ -402,30 +417,30 @@ main :: proc() {
 	}
 
 	for {
-		cpu.joypad = {.B_Left, .A_Right, .Start_Down, .Select_Up}
-
-		switch {
-		case .Select_DPad not_in cpu.joypad:
+		// cpu.joypad = transmute(bit_set[Joypad;u8])memory.io[0x00]
+		cpu.joypad = {.B_Left, .A_Right, .Start_Down, .Select_Up, .Select_DPad}
+		log.debug(cpu.joypad)
+		if .Select_DPad not_in cpu.joypad {
 			if rl.IsKeyDown(.A) do cpu.joypad -= {.B_Left}
 			if rl.IsKeyDown(.D) do cpu.joypad -= {.A_Right}
 			if rl.IsKeyDown(.W) do cpu.joypad -= {.Select_Up}
 			if rl.IsKeyDown(.S) do cpu.joypad -= {.Start_Down}
-		case .Select_Buttons not_in cpu.joypad:
+
+		} else if .Select_Buttons not_in cpu.joypad {
 			if rl.IsKeyDown(.Q) do cpu.joypad -= {.B_Left}
 			if rl.IsKeyDown(.E) do cpu.joypad -= {.A_Right}
 			if rl.IsKeyDown(.ENTER) do cpu.joypad -= {.Select_Up}
 			if rl.IsKeyDown(.SPACE) do cpu.joypad -= {.Start_Down}
 		}
 
-
-		// if transmute(u8)cpu.joypad & 0x0F != 0 {
+		// if (transmute(u8)cpu.joypad != 0x00) {
 		// 	cpu.interrupt.flags += {.Joypad}
 		// }
-
 
 		step_cpu()
 		step_gpu()
 		interrupt_step()
+
 
 		if thread.is_done(t) {
 			thread.destroy(t)

@@ -487,8 +487,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-		// return transmute(u8)cpu.joypad
-		return 0xFF
+		return transmute(u8)cpu.joypad
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
 	case address == 0xFF4A:
@@ -509,11 +508,9 @@ read_u8 :: proc(address: Address) -> u8 {
 	}
 }
 
-
 read_u16 :: proc(address: Address) -> u16 {
 	return u16(read_u8(address)) | (u16(read_u8(address + 1)) << 8)
 }
-
 
 write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	switch {
