@@ -180,25 +180,33 @@ draw_scanline :: proc(line: u8) {
 			transmute(bit_set[ObjectFlags;u8])memory.oam[id + 3],
 		}
 
+		// object := cast(^Object)(&memory.oam[i])
+		// object = transmute(Object)memory.oam[i]
 
 		sp_x := object.x - 8
 		sp_y := object.y - 16
 
 		if !(sp_y <= line && (sp_y + 8) > line) do continue
 
-		offset := (u32(line) * SCREEN_WIDTH) + u32(sp_x)
+		offset := (u32(gpu.scanline) * SCREEN_WIDTH) + u32(sp_x)
 		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
 
 
-		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
+		// y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
+		y: u8 = u8(line - sp_y)
+
+		if object.tile_index == 255 do break
+		if object.x == 255 do break
+		if object.y == 255 do break
+
+		fmt.printfln("OBJ: %v", object)
 
 		for x in 0 ..< 8 {
+
 			can_draw := (sp_x + u8(x)) >= 0 && (sp_x + u8(x)) < SCREEN_WIDTH
 			can_draw &&= (.Priority not_in object.flags || scanline_row[sp_x + u8(x)] == 0)
-			//
 			if !can_draw do continue
 
-			fmt.printfln("OBJ: %v | %v | %v", object, (sp_x + u8(x)), (sp_x + u8(x)))
 			tile := tiles[object.tile_index]
 
 			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
@@ -208,27 +216,6 @@ draw_scanline :: proc(line: u8) {
 			framebuffer[offset] = palette[color]
 			offset += 1
 		}
-	}
-
-}
-
-
-insert_tile_in_framebuffer :: proc(
-	framebuffer: ^Framebuffer,
-	pos: Vec2,
-	tile: TileData,
-	palette: Palette,
-) {
-	left := tile[pos.y * 2]
-	right := tile[pos.y * 2 + 1]
-	// line: [8]Color
-
-	#unroll for x in 0 ..< 8 {
-		low := (left >> u8(x)) & 1
-		high := (right >> u8(x)) & 1
-
-		// log.warn(palette[(high << 1) + low])
-		framebuffer[(u8(x) + pos.x) + (pos.y * SCREEN_WIDTH)] = palette[(high << 1) + low]
 	}
 
 }
