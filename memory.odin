@@ -487,7 +487,16 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-		return transmute(u8)cpu.joypad
+		value: u8 = 0xC0 | (memory.io[0x00] & 0x30)
+		lower: u8 = 0x0F
+		if (memory.io[0x00] & 0x20) == 0 { // P15 low -> Buttons
+			lower &= transmute(u8)cpu.input.buttons
+		}
+		if (memory.io[0x00] & 0x10) == 0 { // P14 low -> Directions
+			lower &= transmute(u8)cpu.input.direction
+		}
+		value |= lower
+		return value
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
 	case address == 0xFF4A:

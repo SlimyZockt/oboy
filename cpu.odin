@@ -65,7 +65,8 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 	cpu.interrupt.enable = {}
 	cpu.interrupt.flags = {}
 
-	cpu.joypad = transmute(bit_set[Joypad;u8])(u8(0xCF))
+	cpu.input.direction = {.Down, .Up, .Left, .Right}
+	cpu.input.buttons = {.Select, .Start, .A, .B}
 
 	memory.io = io_reset
 
@@ -100,6 +101,10 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 }
 
 step_cpu :: proc() {
+	if cpu.stopped {
+		return
+	}
+
 	switch cpu.pre_opcode {
 	case 0xF3:
 		// DI
@@ -142,8 +147,6 @@ step_cpu :: proc() {
 
 	cpu.PC += Address(instruction.bytes - 1)
 
-	fmt.printfln("PC OFF: %v", Address(instruction.bytes - 1))
-
 	execute_instruction(opcode, operand)
 	cpu.pre_opcode = opcode
 
@@ -159,7 +162,7 @@ step_cpu :: proc() {
 	     .ILLEGAL_ED,
 	     .ILLEGAL_DB,
 	     .ILLEGAL_EB:
-		log.panicf("Illagel instruction: 0x%02X", opcode)
+		log.panicf("Illegel instruction: 0x%02X", opcode)
 	}
 
 	if len(instruction.cycles) == 1 {
@@ -171,8 +174,8 @@ step_cpu :: proc() {
 
 execute_instruction :: proc(opcode: u8, operand: Operand) {
 	when ODIN_DEBUG {
-		if !run_cb_instructions[opcode] {
-			run_cb_instructions[opcode] = true
+		if !run_instructions[opcode] {
+			run_instructions[opcode] = true
 		}
 	}
 
@@ -1834,9 +1837,10 @@ srl_HL :: proc() {
 }
 
 stop :: proc() {
-	//TODO: implement stop
-	panic("stop not implemented yet")
-
+	cpu.stopped = true
+	if (cpu.interrupt.flags & cpu.interrupt.enable) != {} {
+		cpu.PC -= 1
+	}
 }
 
 sub :: proc($mode: U8_ARG_MODE, $r8: R8, operand: u8) {

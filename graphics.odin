@@ -173,15 +173,14 @@ draw_scanline :: proc(line: u8) {
 	// if .OBJ_Enable not_in gpu.controll do return
 	for i in 0 ..< 40 {
 		id := i * 4
-		object := Object {
-			memory.oam[id],
-			memory.oam[id + 1],
-			memory.oam[id + 2],
-			transmute(bit_set[ObjectFlags;u8])memory.oam[id + 3],
-		}
+		// object := Object {
+		// 	memory.oam[id],
+		// 	memory.oam[id + 1],
+		// 	memory.oam[id + 2],
+		// 	transmute(bit_set[ObjectFlags;u8])memory.oam[id + 3],
+		// }
 
-		// object := cast(^Object)(&memory.oam[i])
-		// object = transmute(Object)memory.oam[i]
+		object := cast(^Object)(&memory.oam[id])
 
 		sp_x := object.x - 8
 		sp_y := object.y - 16
@@ -198,8 +197,6 @@ draw_scanline :: proc(line: u8) {
 		if object.tile_index == 255 do break
 		if object.x == 255 do break
 		if object.y == 255 do break
-
-		fmt.printfln("OBJ: %v", object)
 
 		for x in 0 ..< 8 {
 

@@ -40,10 +40,15 @@ Interrupt :: enum u8 {
 }
 
 Cpu :: struct {
+	stopped:    bool,
 	PC:         Address,
 	SP:         Address,
 	pre_opcode: u8,
-	joypad:     bit_set[Joypad;u8],
+	// joypad:     bit_set[Joypad;u8],
+	input:      struct {
+		buttons:   bit_set[Buttons;u8],
+		direction: bit_set[Direction;u8],
+	},
 	ticks:      u64,
 	interrupt:  struct {
 		master: bool,
@@ -82,14 +87,29 @@ Cpu :: struct {
 	},
 }
 
-Joypad :: enum u8 {
-	A_Right,
-	B_Left,
-	Select_Up,
-	Start_Down,
-	Select_DPad,
-	Select_Buttons,
+// Joypad :: enum u8 {
+// 	A_Right,
+// 	B_Left,
+// 	Select_Up,
+// 	Start_Down,
+// 	Select_DPad,
+// 	Select_Buttons,
+// }
+
+Buttons :: enum u8 {
+	A,
+	B,
+	Select,
+	Start,
 }
+
+Direction :: enum u8 {
+	Right,
+	Down,
+	Left,
+	Up,
+}
+
 
 LCD_Control :: enum u8 {
 	Background_Window_Enable,
@@ -409,7 +429,7 @@ main :: proc() {
 				rl.WHITE,
 			)
 
-			rl.ClearBackground(rl.WHITE)
+			rl.ClearBackground(rl.BLACK)
 			rl.EndDrawing()
 		}
 
@@ -417,21 +437,23 @@ main :: proc() {
 	}
 
 	for {
-		// cpu.joypad = transmute(bit_set[Joypad;u8])memory.io[0x00]
-		cpu.joypad = {.B_Left, .A_Right, .Start_Down, .Select_Up, .Select_DPad}
-		log.debug(cpu.joypad)
-		if .Select_DPad not_in cpu.joypad {
-			if rl.IsKeyDown(.A) do cpu.joypad -= {.B_Left}
-			if rl.IsKeyDown(.D) do cpu.joypad -= {.A_Right}
-			if rl.IsKeyDown(.W) do cpu.joypad -= {.Select_Up}
-			if rl.IsKeyDown(.S) do cpu.joypad -= {.Start_Down}
 
-		} else if .Select_Buttons not_in cpu.joypad {
-			if rl.IsKeyDown(.Q) do cpu.joypad -= {.B_Left}
-			if rl.IsKeyDown(.E) do cpu.joypad -= {.A_Right}
-			if rl.IsKeyDown(.ENTER) do cpu.joypad -= {.Select_Up}
-			if rl.IsKeyDown(.SPACE) do cpu.joypad -= {.Start_Down}
+		cpu.input.direction = {.Down, .Up, .Left, .Right}
+		cpu.input.buttons = {.Select, .Start, .A, .B}
+		if rl.GetKeyPressed() != .KEY_NULL {
+			cpu.stopped = false
 		}
+
+
+		if rl.IsKeyDown(.A) {cpu.input.direction -= {.Left}}
+		if rl.IsKeyDown(.D) {cpu.input.direction -= {.Right}}
+		if rl.IsKeyDown(.W) {cpu.input.direction -= {.Up}}
+		if rl.IsKeyDown(.S) {cpu.input.direction -= {.Down}}
+
+		if rl.IsKeyDown(.Q) {cpu.input.buttons -= {.B}}
+		if rl.IsKeyDown(.E) {cpu.input.buttons -= {.A}}
+		if rl.IsKeyDown(.TAB) {cpu.input.buttons -= {.Select}}
+		if rl.IsKeyDown(.SPACE) {cpu.input.buttons -= {.Start}}
 
 		// if (transmute(u8)cpu.joypad != 0x00) {
 		// 	cpu.interrupt.flags += {.Joypad}
