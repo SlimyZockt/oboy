@@ -416,12 +416,11 @@ rrc :: proc(val: ^u8) {
 }
 
 rr :: proc(value: ^u8) {
-	carry := u8(.C in cpu.registers.F)
-
-	toggle_flag(value^ & 0x80 != 0, .C)
-
-	value^ <<= 1
-	value^ += carry
+	carry_in := u8(.C in cpu.registers.F) << 7
+	carry_out := value^ & 0x01
+	value^ >>= 1
+	value^ |= carry_in
+	toggle_flag(carry_out != 0, .C)
 }
 
 toggle_flag :: #force_inline proc(cond: bool, flag: Flags) {
@@ -487,16 +486,12 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-		value: u8 = 0xC0 | (memory.io[0x00] & 0x30)
-		lower: u8 = 0x0F
-		if (memory.io[0x00] & 0x20) == 0 { // P15 low -> Buttons
-			lower &= transmute(u8)cpu.input.buttons
+		if transmute(u8)cpu.joypad & 0xF != 0b1111 {
+			fmt.printfln("Read Joy: %08b", cpu.joypad)
 		}
-		if (memory.io[0x00] & 0x10) == 0 { // P14 low -> Directions
-			lower &= transmute(u8)cpu.input.direction
-		}
-		value |= lower
-		return value
+
+		return transmute(u8)cpu.joypad
+
 	case address == 0xFF0F:
 		return transmute(u8)cpu.interrupt.flags
 	case address == 0xFF4A:
@@ -541,6 +536,8 @@ write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	case is_address_in_mm(address, MM.Hram):
 		memory.hram[address - MM_Start[MM.Hram]] = value
 
+	case address == 0xFF00:
+		cpu.joypad = transmute(bit_set[Joypad;u8])value
 	case address == 0xFF40:
 		gpu.controll = transmute(bit_set[LCD_Control;u8])value
 

@@ -191,8 +191,7 @@ draw_scanline :: proc(line: u8) {
 		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
 
 
-		// y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
-		y: u8 = u8(line - sp_y)
+		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
 
 		if object.tile_index == 255 do break
 		if object.x == 255 do break

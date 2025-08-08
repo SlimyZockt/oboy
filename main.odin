@@ -44,11 +44,11 @@ Cpu :: struct {
 	PC:         Address,
 	SP:         Address,
 	pre_opcode: u8,
-	// joypad:     bit_set[Joypad;u8],
-	input:      struct {
-		buttons:   bit_set[Buttons;u8],
-		direction: bit_set[Direction;u8],
-	},
+	joypad:     bit_set[Joypad;u8],
+	// input:      struct {
+	// 	buttons:   bit_set[Buttons;u8],
+	// 	direction: bit_set[Direction;u8],
+	// },
 	ticks:      u64,
 	interrupt:  struct {
 		master: bool,
@@ -87,14 +87,14 @@ Cpu :: struct {
 	},
 }
 
-// Joypad :: enum u8 {
-// 	A_Right,
-// 	B_Left,
-// 	Select_Up,
-// 	Start_Down,
-// 	Select_DPad,
-// 	Select_Buttons,
-// }
+Joypad :: enum u8 {
+	A_Right,
+	B_Left,
+	Select_Up,
+	Start_Down,
+	Select_DPad,
+	Select_Buttons,
+}
 
 Buttons :: enum u8 {
 	A,
@@ -437,23 +437,23 @@ main :: proc() {
 	}
 
 	for {
-
-		cpu.input.direction = {.Down, .Up, .Left, .Right}
-		cpu.input.buttons = {.Select, .Start, .A, .B}
+		cpu.joypad += {.B_Left, .A_Right, .Select_Up, .Start_Down}
 		if rl.GetKeyPressed() != .KEY_NULL {
 			cpu.stopped = false
 		}
 
+		if .Select_DPad not_in cpu.joypad {
+			if rl.IsKeyDown(.A) {cpu.joypad -= {.B_Left}}
+			if rl.IsKeyDown(.D) {cpu.joypad -= {.A_Right}}
+			if rl.IsKeyDown(.W) {cpu.joypad -= {.Select_Up}}
+			if rl.IsKeyDown(.S) {cpu.joypad -= {.Start_Down}}
+		} else if .Select_Buttons not_in cpu.joypad {
+			if rl.IsKeyDown(.Q) {cpu.joypad -= {.B_Left}}
+			if rl.IsKeyDown(.E) {cpu.joypad -= {.A_Right}}
+			if rl.IsKeyDown(.ENTER) {cpu.joypad -= {.Select_Up}}
+			if rl.IsKeyDown(.SPACE) {cpu.joypad -= {.Start_Down}}
+		}
 
-		if rl.IsKeyDown(.A) {cpu.input.direction -= {.Left}}
-		if rl.IsKeyDown(.D) {cpu.input.direction -= {.Right}}
-		if rl.IsKeyDown(.W) {cpu.input.direction -= {.Up}}
-		if rl.IsKeyDown(.S) {cpu.input.direction -= {.Down}}
-
-		if rl.IsKeyDown(.Q) {cpu.input.buttons -= {.B}}
-		if rl.IsKeyDown(.E) {cpu.input.buttons -= {.A}}
-		if rl.IsKeyDown(.TAB) {cpu.input.buttons -= {.Select}}
-		if rl.IsKeyDown(.SPACE) {cpu.input.buttons -= {.Start}}
 
 		// if (transmute(u8)cpu.joypad != 0x00) {
 		// 	cpu.interrupt.flags += {.Joypad}
