@@ -187,30 +187,30 @@ draw_scanline :: proc(line: u8) {
 
 		if !(sp_y <= line && (sp_y + 8) > line) do continue
 
-		offset := (u32(gpu.scanline) * SCREEN_WIDTH) + u32(sp_x)
+
 		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
 
 
 		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
 
-		if object.tile_index == 255 do break
-		if object.x == 255 do break
-		if object.y == 255 do break
+		if object.tile_index == 255 do continue
+		if object.x == 255 do continue
+		if object.y == 255 do continue
 
 		for x in 0 ..< 8 {
+			sx := (sp_x + u8(x))
 
-			can_draw := (sp_x + u8(x)) >= 0 && (sp_x + u8(x)) < SCREEN_WIDTH
-			can_draw &&= (.Priority not_in object.flags || scanline_row[sp_x + u8(x)] == 0)
+			can_draw := sx >= 0
+			can_draw &&= sx < SCREEN_WIDTH
+			can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
 			if !can_draw do continue
 
 			tile := tiles[object.tile_index]
-
 			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
-
 			if color == 0 do continue
 
-			framebuffer[offset] = palette[color]
-			offset += 1
+			dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
+			framebuffer[dst] = palette[color]
 		}
 	}
 
