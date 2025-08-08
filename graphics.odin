@@ -142,6 +142,8 @@ draw_scanline :: proc(line: u8) {
 		bg_y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
 		bg_x := gpu.scroll_x & 0b0000_0111
 
+		win_y := u8(u16(line) & 0b0000_0111)
+
 		tile_data_offset: u8 = .Tiledata_Offset in gpu.controll ? 0 : 128
 		bg_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
 
@@ -167,6 +169,18 @@ draw_scanline :: proc(line: u8) {
 			}
 
 			if .Window_Enable not_in gpu.controll do continue
+
+			if line < gpu.win_y do continue
+			if u8(x) < gpu.win_x do continue
+
+			line := tiles[win_tile_index][win_y * 8:][:8]
+
+			for win_color, win_x in line {
+				screen_pos_x := x + win_x
+				if screen_pos_x > SCREEN_WIDTH do continue
+
+				framebuffer[pixel_offset + screen_pos_x] = win_color
+			}
 		}
 	}
 
@@ -181,9 +195,7 @@ draw_scanline :: proc(line: u8) {
 
 		if !(sp_y <= line && (sp_y + 8) > line) do continue
 
-
 		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
-
 
 		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
 
@@ -192,12 +204,12 @@ draw_scanline :: proc(line: u8) {
 
 			can_draw := sx >= 0
 			can_draw &&= sx < SCREEN_WIDTH
-			// can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
+			can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
 			if !can_draw do continue
 
 			tile := tiles[object.tile_index]
 			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
-			// if color == 0 do continue
+			if color == 0 do continue
 
 			dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
 			framebuffer[dst] = palette[color]
