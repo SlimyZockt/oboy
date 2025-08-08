@@ -94,6 +94,8 @@ Joypad :: enum u8 {
 	Start_Down,
 	Select_DPad,
 	Select_Buttons,
+	_,
+	_,
 }
 
 Buttons :: enum u8 {
@@ -329,8 +331,6 @@ main :: proc() {
 
 	rl.SetTraceLogLevel(.ALL)
 	rl.SetTraceLogCallback(rl_trace_log)
-	// libc.signal(libc.SIGSEGV, sig_handler)
-	// libc.signal(libc.SIGILL, sig_handler)
 
 	debug_data = make([dynamic]Instruction_Debug_Data)
 	defer delete(debug_data)

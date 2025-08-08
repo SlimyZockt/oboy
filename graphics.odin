@@ -60,7 +60,7 @@ step_gpu :: proc() {
 		if gpu.dots < 204 do break
 		gpu.scanline += 1
 
-		if gpu.scanline == 143 {
+		if gpu.scanline >= 144 {
 			if .VBlank in cpu.interrupt.enable {
 				cpu.interrupt.flags += {.VBlank}
 				assert(.VBlank in cpu.interrupt.enable)
@@ -135,7 +135,7 @@ draw_scanline :: proc(line: u8) {
 		bg_tilemap += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
 
-		win_tilemap: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
+		win_tilemap: u16 = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
 
 		line_offset := u16(gpu.scroll_x) >> 3
 
@@ -148,7 +148,7 @@ draw_scanline :: proc(line: u8) {
 
 		win_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
 
-		pixel_offset := int(gpu.scanline) * SCREEN_WIDTH
+		pixel_offset := int(line) * SCREEN_WIDTH
 
 		for x in 0 ..< 160 {
 			color := tiles[bg_tile_index][bg_y * 8 + bg_x]
@@ -170,15 +170,9 @@ draw_scanline :: proc(line: u8) {
 		}
 	}
 
-	// if .OBJ_Enable not_in gpu.controll do return
+	if .OBJ_Enable not_in gpu.controll do return
 	for i in 0 ..< 40 {
 		id := i * 4
-		// object := Object {
-		// 	memory.oam[id],
-		// 	memory.oam[id + 1],
-		// 	memory.oam[id + 2],
-		// 	transmute(bit_set[ObjectFlags;u8])memory.oam[id + 3],
-		// }
 
 		object := cast(^Object)(&memory.oam[id])
 
@@ -193,21 +187,17 @@ draw_scanline :: proc(line: u8) {
 
 		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
 
-		if object.tile_index == 255 do continue
-		if object.x == 255 do continue
-		if object.y == 255 do continue
-
 		for x in 0 ..< 8 {
 			sx := (sp_x + u8(x))
 
 			can_draw := sx >= 0
 			can_draw &&= sx < SCREEN_WIDTH
-			can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
+			// can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
 			if !can_draw do continue
 
 			tile := tiles[object.tile_index]
 			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
-			if color == 0 do continue
+			// if color == 0 do continue
 
 			dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
 			framebuffer[dst] = palette[color]
