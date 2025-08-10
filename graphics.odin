@@ -134,7 +134,6 @@ draw_scanline :: proc(line: u8) {
 		bg_tilemap: u16 = 0x1C00 if .Background_Area_Offset in gpu.controll else 0x1800
 		bg_tilemap += ((u16(u16(gpu.scanline) + u16(gpu.scroll_y)) & 0xFF) >> 3) << 5
 
-
 		win_tilemap: u16 = 0x1C00 if .Window_Area_Offset in gpu.controll else 0x1800
 
 		line_offset := u16(gpu.scroll_x) >> 3
@@ -147,8 +146,7 @@ draw_scanline :: proc(line: u8) {
 		tile_data_offset: u8 = .Tiledata_Offset in gpu.controll ? 0 : 128
 		bg_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
 
-
-		win_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
+		win_tile_index := memory.vram[win_tilemap + line_offset] + tile_data_offset
 
 		pixel_offset := int(line) * SCREEN_WIDTH
 
@@ -181,6 +179,9 @@ draw_scanline :: proc(line: u8) {
 
 				framebuffer[pixel_offset + screen_pos_x] = win_color
 			}
+
+			// line_offset = (line_offset + 1) & 31
+			// win_tile_index := memory.vram[win_tilemap + line_offset] + tile_data_offset
 		}
 	}
 

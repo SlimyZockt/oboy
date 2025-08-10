@@ -45,10 +45,6 @@ Cpu :: struct {
 	SP:         Address,
 	pre_opcode: u8,
 	joypad:     bit_set[Joypad;u8],
-	// input:      struct {
-	// 	buttons:   bit_set[Buttons;u8],
-	// 	direction: bit_set[Direction;u8],
-	// },
 	ticks:      u64,
 	interrupt:  struct {
 		master: bool,
@@ -97,6 +93,7 @@ Joypad :: enum u8 {
 	_,
 	_,
 }
+
 
 Buttons :: enum u8 {
 	A,
@@ -480,4 +477,3 @@ Render_Data :: struct {
 	draw:        ^bool,
 	framebuffer: ^Framebuffer,
 }
-
