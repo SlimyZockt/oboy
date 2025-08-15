@@ -2,7 +2,6 @@ package main
 
 import "base:intrinsics"
 import "core:fmt"
-import "core:log"
 import inst "instructions"
 
 ConditionCode :: enum u8 {
@@ -73,7 +72,6 @@ load_boot_rom :: proc(cpu: ^Cpu) {
 	for &pixel in framebuffer {
 		pixel = Color{255, 255, 255}
 	}
-
 	gpu.dots = 0
 	gpu.draw = true
 	gpu.mode = .HBlank
@@ -159,7 +157,7 @@ step_cpu :: proc() {
 	     .ILLEGAL_ED,
 	     .ILLEGAL_DB,
 	     .ILLEGAL_EB:
-		log.panicf("Illegel instruction: 0x%02X", opcode)
+		fmt.panicf("Illegel instruction: 0x%02X", opcode)
 	}
 
 	if len(instruction.cycles) == 1 {
@@ -173,9 +171,9 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	when ODIN_DEBUG {
 		instruction := inst.UnprefixedInstructions[opcode]
 		fmt.printfln("At 0x%04X: [%02X] %s", cpu.PC, opcode, instruction.name)
-		run_instruction_mnemonics += {instruction.mnemonic}
-		if !run_instructions[opcode] {
-			run_instructions[opcode] = true
+		debug_data.run_instruction_mnemonics += {instruction.mnemonic}
+		if !debug_data.run_instructions[opcode] {
+			debug_data.run_instructions[opcode] = true
 		}
 	}
 
@@ -683,19 +681,17 @@ execute_instruction :: proc(opcode: u8, operand: Operand) {
 	}
 }
 
-
 execute_prefixed_instruction :: proc() {
-	// cpu.PC += 1
 	opcode := read_u8(cpu.PC)
 	cpu.PC += 1
 	when ODIN_DEBUG {
 		instruction := inst.PrefixedInstructions[opcode]
 		fmt.printfln("At 0x%04X: [%02X] %s", cpu.PC, opcode, instruction.name)
 
-		run_instruction_mnemonics += {instruction.mnemonic}
+		debug_data.run_instruction_mnemonics += {instruction.mnemonic}
 
-		if !run_cb_instructions[opcode] {
-			run_cb_instructions[opcode] = true
+		if !debug_data.run_cb_instructions[opcode] {
+			debug_data.run_cb_instructions[opcode] = true
 		}
 	}
 	switch opcode {
@@ -1893,4 +1889,3 @@ xor_A :: proc($mode: U8_ARG_MODE, $r8: R8, operand: u8) {
 
 	cpu.registers.F -= {.N, .H, .C}
 }
-

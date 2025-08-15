@@ -161,7 +161,60 @@ Instruction_Debug_Data :: struct {
 	kind:     inst.Mnemonic,
 }
 
-debug_data: [dynamic]Instruction_Debug_Data
+Cartridge_Features :: enum {
+	Rom,
+	MBC1,
+	Ram,
+	Battery,
+	MBC2,
+	MMM01,
+	Timer,
+	MBC3,
+	MBC5,
+	MBC6,
+	MBC7,
+	Rumble,
+	Sensor,
+	Pocket_Camera,
+	Bandai_tama5,
+	HuC3,
+	HuC1,
+}
+
+Cartridge_Type :: bit_set[Cartridge_Features;u32]
+
+@(rodata)
+cartridge_lookup: [28]struct {
+	code: u8,
+	type: Cartridge_Type,
+} =
+	{{0x00, {.Rom}}, {0x01, {.MBC1}}, {0x02, {.MBC1, .Ram}}, {0x03, {.MBC1, .Ram, .Battery}}, {0x05, {.MBC2}}, {0x06, {.MBC2, .Battery}}, {0x08, {.Rom, .Ram}}, {0x09, {.Rom, .Ram, .Battery}}, {0x0B, {.MMM01}}, {0x0C, {.MMM01, .Ram}}, {0x0D, {.MMM01, .Ram, .Battery}}, {0x0F, {.MBC3, .Timer, .Battery}}, {0x10, {.MBC3, .Timer, .Ram, .Battery}}, {0x11, {.MBC3}}, {0x12, {.MBC3, .Ram}}, {0x13, {.MBC3, .Ram, .Battery}}, {0x19, {.MBC5}}, {0x1a, {.MBC5, .Ram}}, {0x1b, {.MBC5, .Ram, .Battery}}, {0x1c, {.MBC5, .Rumble}}, {0x1d, {.MBC5, .Rumble, .Ram}}, {0x1d, {.MBC5, .Rumble, .Ram, .Battery}}, {0x1d, {.MBC6}}, {0x1d, {.MBC7, .Sensor, .Rumble, .Ram, .Battery}}, {0x1d, {.Pocket_Camera}}, {0x1d, {.Bandai_tama5}}, {0x1d, {.HuC3}}, {0x1d, {.HuC1, .Ram, .Battery}}}
+
+
+get_cartridge_type :: proc(code: u8) -> Cartridge_Type {
+	for type in cartridge_lookup {
+		if type.code == code {
+			return type.type
+		}
+	}
+	panic("Cartridge type not Supported")
+}
+
+
+Memory :: struct {
+	write:              bool,
+	bank:               u8,
+	cartridge_features: Cartridge_Type,
+	cartridge:          []u8,
+	rom:                [0x4000]u8,
+	switch_rom:         [0x4000]u8,
+	extern_ram:         [0x2000]u8,
+	vram:               [0x2000]u8,
+	oam:                [0x00A0]u8,
+	wram:               [0x2000]u8,
+	hram:               [0x80]u8,
+	io:                 [0x100]u8,
+}
 
 g_ctx: runtime.Context
 
@@ -169,26 +222,7 @@ mutex: sync.Mutex
 cpu: Cpu
 gpu: Gpu
 memory: Memory
-
-Memory :: struct {
-	rom:        [0x8000]u8,
-	extern_ram: [0x2000]u8,
-	vram:       [0x2000]u8,
-	oam:        [0x00A0]u8,
-	wram:       [0x2000]u8,
-	hram:       [0x80]u8,
-	io:         [0x100]u8,
-}
-
-
 debug_arena: vmem.Arena
-
-sig_handler :: proc "c" (_: c.int) {
-	context = g_ctx
-	print_debug_data()
-
-	log.panic("main.panic")
-}
 
 rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c.va_list) {
 	context = g_ctx
@@ -231,10 +265,14 @@ rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c
 	)
 }
 
+DebugData :: struct {
+	run_instruction_mnemonics: bit_set[inst.Mnemonic],
+	run_instructions:          [0x100]bool,
+	run_cb_instructions:       [0x100]bool,
+	instruction_data:          [dynamic]Instruction_Debug_Data,
+}
 
-run_instruction_mnemonics: bit_set[inst.Mnemonic]
-run_instructions: [0x100]bool
-run_cb_instructions: [0x100]bool
+debug_data: DebugData
 
 print_debug_data :: proc() {
 	DEBUG_FOLDER :: "debug"
@@ -242,7 +280,7 @@ print_debug_data :: proc() {
 
 	trace_log_builder: strings.Builder
 	defer strings.builder_destroy(&trace_log_builder)
-	for instruction_data in debug_data {
+	for instruction_data in debug_data.instruction_data {
 		lookup :=
 			inst.PrefixedInstructions if instruction_data.prefixed else inst.UnprefixedInstructions
 
@@ -281,56 +319,41 @@ print_debug_data :: proc() {
 	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
 	ensure(err == nil)
 
-	log.debug(run_instruction_mnemonics)
+	log.debug(debug_data.run_instruction_mnemonics)
 
 	fmt.print("Run instructions: ")
-	for used, i in run_instructions {
+	for used, i in debug_data.run_instructions {
 		if !used do continue
 		fmt.printf("0x%02x, ", i)
 	}
 	fmt.print("\n")
 
 	fmt.print("Run cb instructions: ")
-	for used, i in run_cb_instructions {
+	for used, i in debug_data.run_cb_instructions {
 		if !used do continue
 		fmt.printf("0x%02x, ", i)
 	}
 	fmt.print("\n")
 }
 
-
-assertion_failure_proc :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
-	print_debug_data()
-	log.fatal(message, location = loc)
-	os.exit(1)
-}
-
-
-Error :: struct {
-	location: runtime.Source_Code_Location,
-	massage:  string,
-}
-
-Result :: union($T: typeid) #no_nil {
-	Error,
-	T,
-}
-
-new_error :: proc(massage: string, location := #caller_location) -> Error {
-	return Error{location, massage}
-}
-
 main :: proc() {
 	g_ctx = context
 
 	context.logger = log.create_console_logger(.Debug)
-	context.assertion_failure_proc = assertion_failure_proc
-
+	context.assertion_failure_proc =
+	proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
+		print_debug_data()
+		log.fatal(message, location = loc)
+		os.exit(1)
+	}
 	rl.SetTraceLogLevel(.ALL)
 	rl.SetTraceLogCallback(rl_trace_log)
 
-	debug_data = make([dynamic]Instruction_Debug_Data)
-	defer delete(debug_data)
+	gb_arena: vmem.Arena
+	err := vmem.arena_init_growing(&gb_arena)
+	ensure(err == nil)
+	gb_alloc := vmem.arena_allocator(&gb_arena)
+	debug_data.instruction_data = make([dynamic]Instruction_Debug_Data, gb_alloc)
 
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -362,23 +385,25 @@ main :: proc() {
 			return
 		}
 
-
 		rom_path := os.args[1]
-		rom_file, err := os.open(rom_path)
-		if err != nil {
+		ok: bool
+		memory.cartridge, ok = os.read_entire_file_from_filename(rom_path, gb_alloc)
+		if !ok {
 			log.error("Can not read file")
 			return
 		}
-		defer os.close(rom_file)
 
-		bytes_read, read_err := os.read(rom_file, memory.rom[:])
-		if read_err != nil {
-			log.error("Can not read file")
-			return
-		}
-		assert(0x8000 == bytes_read)
+		//lookup type
+		memory.cartridge_features = get_cartridge_type(memory.cartridge[0x0147])
 
+		rom_size := 32768 * (1 << memory.cartridge[0x0148])
+		log.debug(rom_size)
+		log.debug(memory.cartridge_features)
+
+		copy_slice(memory.rom[:], memory.cartridge[:0x4000])
+		copy_slice(memory.switch_rom[:], memory.cartridge[0x4000:][:0x4000])
 	}
+	defer delete(memory.cartridge)
 
 	load_boot_rom(&cpu)
 
@@ -401,7 +426,6 @@ main :: proc() {
 
 			if draw^ {
 				rl.UpdateTexture(texture, framebuffer)
-
 				sync.mutex_lock(mutex)
 				draw^ = false
 				sync.mutex_unlock(mutex)
@@ -452,14 +476,13 @@ main :: proc() {
 		}
 
 
-		// if (transmute(u8)cpu.joypad != 0x00) {
-		// 	cpu.interrupt.flags += {.Joypad}
-		// }
+		if (transmute(u8)cpu.joypad != 0x00) {
+			cpu.interrupt.flags += {.Joypad}
+		}
 
 		step_cpu()
 		step_gpu()
 		interrupt_step()
-
 
 		if thread.is_done(t) {
 			thread.destroy(t)
@@ -471,9 +494,4 @@ main :: proc() {
 	when ODIN_DEBUG {
 		print_debug_data()
 	}
-}
-
-Render_Data :: struct {
-	draw:        ^bool,
-	framebuffer: ^Framebuffer,
 }

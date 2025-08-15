@@ -459,12 +459,12 @@ copy :: proc(dest: Address, source: Address, len: u64) {
 
 read_u8 :: proc(address: Address) -> u8 {
 	switch {
-	case is_address_in_mm(address, MM.Rom) || is_address_in_mm(address, MM.Switch_Rom):
+	case is_address_in_mm(address, MM.Rom):
 		return memory.rom[address]
-
+	case is_address_in_mm(address, MM.Switch_Rom):
+		return memory.switch_rom[address - MM_Start[MM.Switch_Rom]]
 	case is_address_in_mm(address, MM.External_Ram):
 		return memory.extern_ram[address - MM_Start[MM.External_Ram]]
-
 	case is_address_in_mm(address, MM.Vram):
 		return memory.vram[address - MM_Start[MM.Vram]]
 
@@ -601,4 +601,3 @@ pop_sp :: proc(location := #caller_location) -> u16 {
 	cpu.SP += 2
 	return value
 }
-
