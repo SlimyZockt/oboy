@@ -204,16 +204,18 @@ get_cartridge_type :: proc(code: u8) -> Cartridge_Type {
 Memory :: struct {
 	write:              bool,
 	bank:               u8,
+	mapper:             ^Mapper,
 	cartridge_features: Cartridge_Type,
+	cartridge_size:     u32,
 	cartridge:          []u8,
-	rom:                [0x4000]u8,
-	switch_rom:         [0x4000]u8,
+	hram:               [0x80]u8,
+	oam:                [0x00A0]u8,
+	io:                 [0x100]u8,
 	extern_ram:         [0x2000]u8,
 	vram:               [0x2000]u8,
-	oam:                [0x00A0]u8,
 	wram:               [0x2000]u8,
-	hram:               [0x80]u8,
-	io:                 [0x100]u8,
+	rom:                [0x4000]u8,
+	switch_rom:         [0x4000]u8,
 }
 
 g_ctx: runtime.Context
@@ -223,7 +225,7 @@ cpu: Cpu
 gpu: Gpu
 memory: Memory
 debug_arena: vmem.Arena
-
+// mapper: ^Mapper()
 rl_trace_log :: proc "c" (rl_level: rl.TraceLogLevel, message: cstring, args: ^c.va_list) {
 	context = g_ctx
 
@@ -314,6 +316,7 @@ print_debug_data :: proc() {
 		SCREEN_WIDTH,
 		SCREEN_HEIGHT,
 	)
+
 	ensure(ok)
 
 	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
@@ -353,6 +356,8 @@ main :: proc() {
 	err := vmem.arena_init_growing(&gb_arena)
 	ensure(err == nil)
 	gb_alloc := vmem.arena_allocator(&gb_arena)
+	context.allocator = gb_alloc
+
 	debug_data.instruction_data = make([dynamic]Instruction_Debug_Data, gb_alloc)
 
 	when ODIN_DEBUG {
@@ -387,21 +392,31 @@ main :: proc() {
 
 		rom_path := os.args[1]
 		ok: bool
-		memory.cartridge, ok = os.read_entire_file_from_filename(rom_path, gb_alloc)
+		memory.cartridge, ok = os.read_entire_file_from_filename(rom_path, )
 		if !ok {
-			log.error("Can not read file")
+			log.error("Can not read file:", ok)
 			return
 		}
 
 		//lookup type
 		memory.cartridge_features = get_cartridge_type(memory.cartridge[0x0147])
+		log.debug(memory.cartridge_features)
 
 		rom_size := 32768 * (1 << memory.cartridge[0x0148])
 		log.debug(rom_size)
-		log.debug(memory.cartridge_features)
+
+
+		switch {
+		case .Rom in memory.cartridge_features:
+			memory.mapper = new_rom(&memory)
+		case .MBC1 in memory.cartridge_features:
+			memory.mapper = new_MBC1(&memory)
+		case:
+		}
 
 		copy_slice(memory.rom[:], memory.cartridge[:0x4000])
 		copy_slice(memory.switch_rom[:], memory.cartridge[0x4000:][:0x4000])
+
 	}
 	defer delete(memory.cartridge)
 

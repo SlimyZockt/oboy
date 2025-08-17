@@ -460,11 +460,11 @@ copy :: proc(dest: Address, source: Address, len: u64) {
 read_u8 :: proc(address: Address) -> u8 {
 	switch {
 	case is_address_in_mm(address, MM.Rom):
-		return memory.rom[address]
+		return memory.mapper->read(address)
 	case is_address_in_mm(address, MM.Switch_Rom):
-		return memory.switch_rom[address - MM_Start[MM.Switch_Rom]]
+		return memory.mapper->read(address)
 	case is_address_in_mm(address, MM.External_Ram):
-		return memory.extern_ram[address - MM_Start[MM.External_Ram]]
+		return memory.mapper->ram_read(address)
 	case is_address_in_mm(address, MM.Vram):
 		return memory.vram[address - MM_Start[MM.Vram]]
 
@@ -518,8 +518,13 @@ read_u16 :: proc(address: Address) -> u16 {
 
 write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	switch {
+	case is_address_in_mm(address, MM.Rom):
+		memory.mapper->write(address, value)
+	case is_address_in_mm(address, MM.Switch_Rom):
+		memory.mapper->write(address, value)
 	case is_address_in_mm(address, MM.External_Ram):
-		memory.extern_ram[address - MM_Start[MM.External_Ram]] = value
+		memory.mapper->ram_write(address, value)
+	// memory.extern_ram[address - MM_Start[MM.External_Ram]] = value
 
 	case is_address_in_mm(address, MM.Vram):
 		memory.vram[address - MM_Start[MM.Vram]] = value
