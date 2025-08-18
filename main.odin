@@ -161,61 +161,17 @@ Instruction_Debug_Data :: struct {
 	kind:     inst.Mnemonic,
 }
 
-Cartridge_Features :: enum {
-	Rom,
-	MBC1,
-	Ram,
-	Battery,
-	MBC2,
-	MMM01,
-	Timer,
-	MBC3,
-	MBC5,
-	MBC6,
-	MBC7,
-	Rumble,
-	Sensor,
-	Pocket_Camera,
-	Bandai_tama5,
-	HuC3,
-	HuC1,
-}
-
-Cartridge_Type :: bit_set[Cartridge_Features;u32]
-
-@(rodata)
-cartridge_lookup: [28]struct {
-	code: u8,
-	type: Cartridge_Type,
-} =
-	{{0x00, {.Rom}}, {0x01, {.MBC1}}, {0x02, {.MBC1, .Ram}}, {0x03, {.MBC1, .Ram, .Battery}}, {0x05, {.MBC2}}, {0x06, {.MBC2, .Battery}}, {0x08, {.Rom, .Ram}}, {0x09, {.Rom, .Ram, .Battery}}, {0x0B, {.MMM01}}, {0x0C, {.MMM01, .Ram}}, {0x0D, {.MMM01, .Ram, .Battery}}, {0x0F, {.MBC3, .Timer, .Battery}}, {0x10, {.MBC3, .Timer, .Ram, .Battery}}, {0x11, {.MBC3}}, {0x12, {.MBC3, .Ram}}, {0x13, {.MBC3, .Ram, .Battery}}, {0x19, {.MBC5}}, {0x1a, {.MBC5, .Ram}}, {0x1b, {.MBC5, .Ram, .Battery}}, {0x1c, {.MBC5, .Rumble}}, {0x1d, {.MBC5, .Rumble, .Ram}}, {0x1d, {.MBC5, .Rumble, .Ram, .Battery}}, {0x1d, {.MBC6}}, {0x1d, {.MBC7, .Sensor, .Rumble, .Ram, .Battery}}, {0x1d, {.Pocket_Camera}}, {0x1d, {.Bandai_tama5}}, {0x1d, {.HuC3}}, {0x1d, {.HuC1, .Ram, .Battery}}}
-
-
-get_cartridge_type :: proc(code: u8) -> Cartridge_Type {
-	for type in cartridge_lookup {
-		if type.code == code {
-			return type.type
-		}
-	}
-	panic("Cartridge type not Supported")
-}
-
 
 Memory :: struct {
-	write:              bool,
-	bank:               u8,
-	mapper:             ^Mapper,
-	cartridge_features: Cartridge_Type,
-	cartridge_size:     u32,
-	cartridge:          []u8,
-	hram:               [0x80]u8,
-	oam:                [0x00A0]u8,
-	io:                 [0x100]u8,
-	extern_ram:         [0x2000]u8,
-	vram:               [0x2000]u8,
-	wram:               [0x2000]u8,
-	rom:                [0x4000]u8,
-	switch_rom:         [0x4000]u8,
+	write:      bool,
+	bank:       u8,
+	mapper:     ^Mapper,
+	hram:       [0x80]u8,
+	oam:        [0x00A0]u8,
+	io:         [0x100]u8,
+	extern_ram: [0x2000]u8,
+	vram:       [0x2000]u8,
+	wram:       [0x2000]u8,
 }
 
 g_ctx: runtime.Context
@@ -391,34 +347,15 @@ main :: proc() {
 		}
 
 		rom_path := os.args[1]
-		ok: bool
-		memory.cartridge, ok = os.read_entire_file_from_filename(rom_path, )
+		rom, ok := os.read_entire_file_from_filename(rom_path)
 		if !ok {
 			log.error("Can not read file:", ok)
 			return
 		}
 
-		//lookup type
-		memory.cartridge_features = get_cartridge_type(memory.cartridge[0x0147])
-		log.debug(memory.cartridge_features)
-
-		rom_size := 32768 * (1 << memory.cartridge[0x0148])
-		log.debug(rom_size)
-
-
-		switch {
-		case .Rom in memory.cartridge_features:
-			memory.mapper = new_rom(&memory)
-		case .MBC1 in memory.cartridge_features:
-			memory.mapper = new_MBC1(&memory)
-		case:
-		}
-
-		copy_slice(memory.rom[:], memory.cartridge[:0x4000])
-		copy_slice(memory.switch_rom[:], memory.cartridge[0x4000:][:0x4000])
-
+		memory.mapper = new_mapper(rom)
 	}
-	defer delete(memory.cartridge)
+	defer free(memory.mapper)
 
 	load_boot_rom(&cpu)
 

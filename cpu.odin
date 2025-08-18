@@ -170,7 +170,7 @@ step_cpu :: proc() {
 execute_instruction :: proc(opcode: u8, operand: Operand) {
 	when ODIN_DEBUG {
 		instruction := inst.UnprefixedInstructions[opcode]
-		fmt.printfln("At 0x%04X: [%02X] %s", cpu.PC, opcode, instruction.name)
+		fmt.printfln("At 0x%04X: [%02X; 0x%04X] %s", cpu.PC, opcode, operand, instruction.name)
 		debug_data.run_instruction_mnemonics += {instruction.mnemonic}
 		if !debug_data.run_instructions[opcode] {
 			debug_data.run_instructions[opcode] = true
@@ -686,7 +686,7 @@ execute_prefixed_instruction :: proc() {
 	cpu.PC += 1
 	when ODIN_DEBUG {
 		instruction := inst.PrefixedInstructions[opcode]
-		fmt.printfln("At 0x%04X: [%02X] %s", cpu.PC, opcode, instruction.name)
+		fmt.printfln("At 0x%04X: [%02X; 0x00] %s", cpu.PC, opcode, instruction.name)
 
 		debug_data.run_instruction_mnemonics += {instruction.mnemonic}
 

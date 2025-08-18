@@ -12,11 +12,11 @@ interrupt_step :: proc() {
 	if .VBlank in fire {
 		cpu.interrupt.flags -= {.VBlank}
 
-		// @(static) start_time: f64
-		// end_time := rl.GetTime()
-		// if (start_time - end_time < 1 / 60) {
-		// 	rl.WaitTime(1 / 60)
-		// }
+		@(static) start_time: f64
+		end_time := rl.GetTime()
+		if (start_time - end_time < 1 / 60) {
+			rl.WaitTime(1 / 60)
+		}
 
 		gpu.draw = true
 		// for gpu.draw {}
@@ -26,7 +26,7 @@ interrupt_step :: proc() {
 
 		cpu.PC = 0x40
 		cpu.ticks += 12
-		// start_time = rl.GetTime()
+		start_time = rl.GetTime()
 	}
 
 	if .LCD in fire {
@@ -73,4 +73,3 @@ interrupt_step :: proc() {
 		cpu.ticks += 12
 	}
 }
-
