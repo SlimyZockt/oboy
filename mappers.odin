@@ -40,7 +40,7 @@ ROM_Size :: enum u8 {
 //Don't change the order
 RAM_Size :: enum u8 {
 	Ram_None,
-	Ram_2KiB,
+	Ram_Unused,
 	Ram_8KiB,
 	Ram_32KiB,
 	Ram_128KiB,
@@ -49,7 +49,7 @@ RAM_Size :: enum u8 {
 
 MapperFeatures :: enum u8 {
 	RAM_Enabled,
-	Enhaneced_Mode,
+	Advanced_Mode,
 }
 
 Mapper :: struct {
@@ -122,24 +122,40 @@ new_mapper :: proc(rom: []u8, allocator := context.allocator) -> ^Mapper {
 		{ 	// Setup MBC1
 			mapper.mode = .MBC1
 
-			mapper.read = proc(mapper: ^Mapper, address: Address) -> u8 {
-				if .Enhaneced_Mode not_in mapper.features do return mapper.rom[address]
-				log.debugf("Reading at %04X; %v", address, mapper.rom_bank)
-
-				switch address {
-				case 0x0000 ..= 0x3FFF:
-					return mapper.rom[address]
-				case 0x4000 ..= 0x7FFF:
-					return mapper.rom[(0x2000 * Address(mapper.rom_bank)) + address]
+			calc_address :: proc(mapper: ^Mapper, address: Address) -> u32 {
+				address := u32(address)
+				high_map := u32(mapper.ram_bank)
+				switch mapper.rom_size {
+				case .Rom_32KiB, .Rom_64KiB, .Rom_128KiB, .Rom_256KiB, .Rom_512KiB:
+				case .Rom_1MiB:
+					high_map = 0x00
+				case .Rom_2MiB:
+					high_map &= 0x01
+				case .Rom_4MiB:
+					if high_map > 0x10 do high_map = 0x10
+				case .Rom_8MiB:
 				}
 
-				return 0x00
+				if address <= 0x3FFF {
+					if .Advanced_Mode in mapper.features {
+						return (address & 0x3fff) | (high_map << 19)
+					}
+
+					return address
+				}
+
+				address = (address & 0x3fff) | (high_map << 19) | (u32(mapper.rom_bank) << 14)
+				if address < 0x4000 do address += 0x4000
+
+				return address
+			}
+
+			mapper.read = proc(mapper: ^Mapper, address: Address) -> u8 {
+				return mapper.rom[calc_address(mapper, address)]
 			}
 
 			mapper.write = proc(mapper: ^Mapper, address: Address, value: u8) {
 				value := value
-
-				log.debugf("Writing %02X at %04X; %v", value, address, mapper.rom_bank)
 				switch address {
 				case 0x0000 ..= 0x1FFF:
 					if value & 0x0A == 0x0A {
@@ -157,37 +173,61 @@ new_mapper :: proc(rom: []u8, allocator := context.allocator) -> ^Mapper {
 					if mapper.rom_size >= .Rom_1MiB {
 						mapper.rom_bank += (mapper.ram_bank << 5)
 					}
+					mapper.rom_bank = value
 				case 0x4000 ..= 0x5FFF:
-					if mapper.rom_size >= .Rom_1MiB || mapper.ram_size >= .Ram_64KiB {
-						mapper.ram_bank = value & 0b0000_0011
-					}
+					// if mapper.rom_size >= .Rom_1MiB || mapper.ram_size >= .Ram_64KiB {
+					mapper.ram_bank = value & 0b0000_0011
+				// }
 				case 0x6000 ..= 0x7FFF:
 					if value & 0x01 == 0 {
-						mapper.features -= {.Enhaneced_Mode}
+						mapper.features -= {.Advanced_Mode}
 					} else {
-						mapper.features += {.Enhaneced_Mode}
+						mapper.features += {.Advanced_Mode}
 					}
-
 				}
 
 			}
 
 			mapper.ram_read = proc(mapper: ^Mapper, address: Address) -> u8 {
-				log.debugf("Reading Ram at %04X; %v", address, mapper.ram_bank)
-				if .RAM_Enabled not_in mapper.features do return 0xFF
-				address := address
-				address -= 0xA000
+				address := u32(address - 0xA000)
+				// if .RAM_Enabled not_in mapper.features do return 0xFF
+				if mapper.ram_size <= .Ram_Unused do return 0xFF
+				if .Advanced_Mode not_in mapper.features do return mapper.ram[address]
 
-				return mapper.ram[(Address(mapper.ram_bank) * 0x2000) + (address)]
+				high_map := u32(mapper.ram_bank)
+				#partial switch mapper.ram_size {
+				case .Ram_8KiB:
+					high_map = 0x00
+				case .Ram_32KiB:
+					high_map &= 0x01
+				case .Ram_128KiB:
+					if high_map > 0x10 do high_map = 0x10
+				case .Ram_64KiB:
+				}
+
+				address = (address & 0x3fff) | (high_map << 13)
+
+				return mapper.ram[address]
 			}
 
 			mapper.ram_write = proc(mapper: ^Mapper, address: Address, value: u8) {
-				log.debugf("Writing Ram %02X at %04X; %v", value, address, mapper.ram_bank)
+				address := u32(address - 0xA000)
 				if .RAM_Enabled not_in mapper.features do return
-				address := address
-				address -= 0xA000
+				if .Advanced_Mode not_in mapper.features do mapper.ram[address] = value
 
-				mapper.ram[(Address(mapper.ram_bank) * 0x2000) + (address)] = value
+				high_map := u32(mapper.ram_bank)
+				#partial switch mapper.ram_size {
+				case .Ram_8KiB:
+					high_map = 0x00
+				case .Ram_32KiB:
+					high_map &= 0x01
+				case .Ram_128KiB:
+					if high_map > 0x10 do high_map = 0x10
+				case .Ram_64KiB:
+				}
+
+				address = (address & 0x3fff) | (high_map << 13)
+				mapper.ram[address] = value
 			}
 		}
 	case:
