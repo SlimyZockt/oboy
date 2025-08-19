@@ -278,21 +278,22 @@ print_debug_data :: proc() {
 	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
 	ensure(err == nil)
 
-	log.debug(debug_data.run_instruction_mnemonics)
+	when ODIN_DEBUG {
+		log.debug(debug_data.run_instruction_mnemonics)
+		fmt.print("Run instructions: ")
+		for used, i in debug_data.run_instructions {
+			if !used do continue
+			fmt.printf("0x%02x, ", i)
+		}
+		fmt.print("\n")
 
-	fmt.print("Run instructions: ")
-	for used, i in debug_data.run_instructions {
-		if !used do continue
-		fmt.printf("0x%02x, ", i)
+		fmt.print("Run cb instructions: ")
+		for used, i in debug_data.run_cb_instructions {
+			if !used do continue
+			fmt.printf("0x%02x, ", i)
+		}
+		fmt.print("\n")
 	}
-	fmt.print("\n")
-
-	fmt.print("Run cb instructions: ")
-	for used, i in debug_data.run_cb_instructions {
-		if !used do continue
-		fmt.printf("0x%02x, ", i)
-	}
-	fmt.print("\n")
 }
 
 main :: proc() {

@@ -6,27 +6,19 @@ import rl "vendor:raylib"
 
 interrupt_step :: proc() {
 	if !cpu.interrupt.master do return
-	// && !cpu.interrupt.enable && !cpu.interrupt.flags
 	fire := cpu.interrupt.enable & cpu.interrupt.flags
 
 	if .VBlank in fire {
 		cpu.interrupt.flags -= {.VBlank}
 
-		@(static) start_time: f64
-		end_time := rl.GetTime()
-		if (start_time - end_time < 1 / 60) {
-			rl.WaitTime(1 / 60)
-		}
-
 		gpu.draw = true
-		// for gpu.draw {}
+		for gpu.draw {}
 
 		cpu.interrupt.master = false
 		push_sp(u16(cpu.PC))
 
 		cpu.PC = 0x40
 		cpu.ticks += 12
-		start_time = rl.GetTime()
 	}
 
 	if .LCD in fire {

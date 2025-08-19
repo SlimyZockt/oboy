@@ -112,14 +112,15 @@ update_tile :: proc(address: Address) {
 	#unroll for x in 0 ..< 8 {
 		bit_index: u8 = 1 << (7 - u8(x))
 
-		msb: u8 = (memory.vram[address] & bit_index != 0) ? 1 : 0
-		lsb: u8 = (memory.vram[address + 1] & bit_index != 0) ? 2 : 0
+		low: u8 = (memory.vram[address] & bit_index != 0) ? 1 : 0
+		high: u8 = (memory.vram[address + 1] & bit_index != 0) ? 2 : 0
 
 		// fmt.printfln("Tile Data %v: %v ", u16(y * 8) + u16(x), (msb + lsb))
-		tiles[tile][u16(y * 8) + u16(x)] = (msb + lsb)
+		tiles[tile][u16(y * 8) + u16(x)] = (low + high)
 	}
 
-	fmt.printfln("Tile %v: %v", tile, tiles[tile])
+	// Debug print removed to avoid excessive logging
+	// fmt.printfln("Tile %v: %v", tile, tiles[tile])
 }
 
 draw_scanline :: proc(line: u8) {
@@ -141,14 +142,24 @@ draw_scanline :: proc(line: u8) {
 		bg_y := u8(u16(line + gpu.scroll_y) & 0b0000_0111)
 		bg_x := gpu.scroll_x & 0b0000_0111
 
-		win_y := u8(u16(line) & 0b0000_0111)
-
-		tile_data_offset: u8 = .Tiledata_Offset in gpu.controll ? 0 : 128
-		bg_tile_index := memory.vram[bg_tilemap + line_offset] + tile_data_offset
-
-		win_tile_index := memory.vram[win_tilemap + line_offset] + tile_data_offset
+		use_unsigned_tile_ids := (.Tiledata_Offset in gpu.controll)
+		bg_tile_id := memory.vram[bg_tilemap + line_offset]
+		bg_tile_index: u16
+		if use_unsigned_tile_ids {
+			bg_tile_index = u16(bg_tile_id)
+		} else {
+			bg_tile_index = u16(256 + i16(i8(bg_tile_id)))
+		}
 
 		pixel_offset := int(line) * SCREEN_WIDTH
+
+		// Precompute window state for this scanline
+		win_active := (.Window_Enable in gpu.controll) && (line >= gpu.win_y)
+		wx_start := i16(gpu.win_x) - 7
+		if wx_start < 0 do wx_start = 0
+		win_line := u16(u16(line) - u16(gpu.win_y))
+		win_row := (win_line >> 3) & 31
+		win_tilemap_row := (win_tilemap + (win_row << 5))
 
 		for x in 0 ..< 160 {
 			color := tiles[bg_tile_index][bg_y * 8 + bg_x]
@@ -162,60 +173,82 @@ draw_scanline :: proc(line: u8) {
 			if (bg_x == 8) {
 				bg_x = 0
 				line_offset = (line_offset + 1) & 31
-				tile_data_offset = .Tiledata_Offset in gpu.controll ? 0 : 128
-				bg_tile_index = memory.vram[bg_tilemap + line_offset] + tile_data_offset
+				bg_tile_id = memory.vram[bg_tilemap + line_offset]
+				if use_unsigned_tile_ids {
+					bg_tile_index = u16(bg_tile_id)
+				} else {
+					bg_tile_index = u16(256 + i16(i8(bg_tile_id)))
+				}
 			}
 
-			if .Window_Enable not_in gpu.controll do continue
+			// Window drawing overlays BG
+			if !win_active do continue
+			if i16(x) < wx_start do continue
 
-			if line < gpu.win_y do continue
-			if u8(x) < gpu.win_x do continue
-
-			line := tiles[win_tile_index][win_y * 8:][:8]
-
-			for win_color, win_x in line {
-				screen_pos_x := x + win_x
-				if screen_pos_x > SCREEN_WIDTH do continue
-
-				framebuffer[pixel_offset + screen_pos_x] = win_color
+			// Compute window tile position
+			x_in_win := u16(i16(x) - wx_start)
+			win_col := (x_in_win >> 3) & 31
+			win_x_in_tile := u8(x_in_win & 7)
+			win_y_in_tile := u8(win_line & 7)
+			win_tile_id := memory.vram[win_tilemap_row + win_col]
+			win_tile_index: u16
+			if use_unsigned_tile_ids {
+				win_tile_index = u16(win_tile_id)
+			} else {
+				win_tile_index = u16(256 + i16(i8(win_tile_id)))
 			}
 
-			// line_offset = (line_offset + 1) & 31
-			// win_tile_index := memory.vram[win_tilemap + line_offset] + tile_data_offset
+			win_color := tiles[win_tile_index][win_y_in_tile * 8 + win_x_in_tile]
+			scanline_row[x] = win_color
+			framebuffer[pixel_offset - 1] = bg_palette[win_color]
 		}
 	}
 
 	if .OBJ_Enable not_in gpu.controll do return
 	for i in 0 ..< 40 {
 		id := i * 4
-
 		object := cast(^Object)(&memory.oam[id])
-
-		sp_x := object.x - 8
-		sp_y := object.y - 16
-
-		if !(sp_y <= line && (sp_y + 8) > line) do continue
-
+		sp_x := i16(object.x) - 8
+		sp_y := i16(object.y) - 16
+		height: i16 = 16 if .OBJ_Size in gpu.controll else 8
+		if !(sp_y <= i16(line) && (sp_y + height) > i16(line)) do continue
 		palette := sprite_palettes[u8(.DMG_Pallet in object.flags)]
-
-		y: u8 = .Y_Filp in object.flags ? 7 - u8(line - sp_y) : u8(line - sp_y)
-
+		if .OBJ_Size in gpu.controll {
+			// 8x16 sprites
+			y_in_sprite: u8 = u8(i16(line) - sp_y)
+			if .Y_Filp in object.flags { y_in_sprite = 15 - y_in_sprite }
+			tile_number := (object.tile_index & 0xFE) + u8(y_in_sprite >> 3)
+			row_in_tile := y_in_sprite & 7
+			tile := tiles[tile_number]
+			for x in 0 ..< 8 {
+				sx := sp_x + i16(x)
+				can_draw := (sx >= 0)
+				can_draw &&= (sx < SCREEN_WIDTH)
+				can_draw &&= (.Priority not_in object.flags || scanline_row[u8(sx)] == 0)
+				if !can_draw do continue
+				col := u8(7 - x) if .X_Filp in object.flags else u8(x)
+				tile_pos := (row_in_tile * 8) + col
+				color := tile[tile_pos]
+				if color == 0 do continue
+				dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
+				framebuffer[dst] = palette[color]
+			}
+			continue
+		}
+		tile := tiles[object.tile_index]
+		y: u8 = u8(i16(line) - sp_y)
+		if .Y_Filp in object.flags { y = 7 - y }
 		for x in 0 ..< 8 {
-			sx := (sp_x + u8(x))
-
-			can_draw := sx >= 0
-			can_draw &&= sx < SCREEN_WIDTH
-			can_draw &&= (.Priority not_in object.flags || scanline_row[sx] == 0)
+			sx := sp_x + i16(x)
+			can_draw := (sx >= 0)
+			can_draw &&= (sx < SCREEN_WIDTH)
+			can_draw &&= (.Priority not_in object.flags || scanline_row[u8(sx)] == 0)
 			if !can_draw do continue
-
-			tile := tiles[object.tile_index]
-			color := .X_Filp in object.flags ? tile[(y * 8) + (7 - u8(x))] : tile[(y * 8) + u8(x)]
+			color := tile[(y * 8) + (7 - u8(x))] if .X_Filp in object.flags else tile[(y * 8) + u8(x)]
 			if color == 0 do continue
-
 			dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
 			framebuffer[dst] = palette[color]
 		}
 	}
 
 }
-

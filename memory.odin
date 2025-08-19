@@ -486,10 +486,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-		if transmute(u8)cpu.joypad & 0xF != 0b1111 {
-			fmt.printfln("Read Joy: %08b", cpu.joypad)
-		}
-
+	
 		return transmute(u8)cpu.joypad
 
 	case address == 0xFF0F:

@@ -175,9 +175,9 @@ new_mapper :: proc(rom: []u8, allocator := context.allocator) -> ^Mapper {
 					}
 					mapper.rom_bank = value
 				case 0x4000 ..= 0x5FFF:
-					// if mapper.rom_size >= .Rom_1MiB || mapper.ram_size >= .Ram_64KiB {
-					mapper.ram_bank = value & 0b0000_0011
-				// }
+					if mapper.rom_size >= .Rom_1MiB || mapper.ram_size >= .Ram_64KiB {
+						mapper.ram_bank = value & 0b0000_0011
+					}
 				case 0x6000 ..= 0x7FFF:
 					if value & 0x01 == 0 {
 						mapper.features -= {.Advanced_Mode}
@@ -190,7 +190,7 @@ new_mapper :: proc(rom: []u8, allocator := context.allocator) -> ^Mapper {
 
 			mapper.ram_read = proc(mapper: ^Mapper, address: Address) -> u8 {
 				address := u32(address - 0xA000)
-				// if .RAM_Enabled not_in mapper.features do return 0xFF
+				if .RAM_Enabled not_in mapper.features do return 0xFF
 				if mapper.ram_size <= .Ram_Unused do return 0xFF
 				if .Advanced_Mode not_in mapper.features do return mapper.ram[address]
 
