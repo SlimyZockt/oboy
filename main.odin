@@ -4,8 +4,6 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:c"
 import "core:fmt"
-import "core:image"
-import "core:image/bmp"
 import "core:log"
 import "core:math"
 import "core:mem"
@@ -177,6 +175,9 @@ Memory :: struct {
 g_ctx: runtime.Context
 
 mutex: sync.Mutex
+cond: sync.Cond
+renderer_running: bool
+
 cpu: Cpu
 gpu: Gpu
 memory: Memory
@@ -267,16 +268,6 @@ print_debug_data :: proc() {
 	os.write_entire_file(DEBUG_FOLDER + "/io.bin", memory.io[:])
 	os.write_entire_file(DEBUG_FOLDER + "/wram.bin", memory.wram[:])
 
-	img, ok := image.pixels_to_image(
-		transmute([]image.RGB_Pixel)framebuffer[:],
-		SCREEN_WIDTH,
-		SCREEN_HEIGHT,
-	)
-
-	ensure(ok)
-
-	err := bmp.save_to_file(DEBUG_FOLDER + "/framebuffer.bmp", &img)
-	ensure(err == nil)
 
 	when ODIN_DEBUG {
 		log.debug(debug_data.run_instruction_mnemonics)
@@ -360,11 +351,25 @@ main :: proc() {
 
 	load_boot_rom(&cpu)
 
+	renderer_running = true
 
-	t := thread.create_and_start_with_poly_data4(&framebuffer, &gpu.draw, &cpu, &mutex, render)
+	ThreadUtil :: struct {
+		mutex: ^sync.Mutex,
+		cond:  ^sync.Cond,
+	}
+
+	thread_data := ThreadUtil{&mutex, &cond}
+
+	t := thread.create_and_start_with_poly_data4(
+		&framebuffer,
+		&gpu.draw,
+		&cpu,
+		&thread_data,
+		render,
+	)
 	assert(t != nil)
 
-	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, cpu: ^Cpu, mutex: ^sync.Mutex) {
+	render :: proc(framebuffer: ^Framebuffer, draw: ^bool, cpu: ^Cpu, td: ^ThreadUtil) {
 		fmt.println("starting Raylib")
 		rl.SetConfigFlags({.WINDOW_RESIZABLE, .WINDOW_MAXIMIZED, .BORDERLESS_WINDOWED_MODE})
 		rl.InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "oboy")
@@ -377,12 +382,14 @@ main :: proc() {
 		rl.SetTargetFPS(60)
 		for !rl.WindowShouldClose() {
 
+			// Atomically check for a new frame and publish it
+			sync.mutex_lock(td.mutex)
 			if draw^ {
 				rl.UpdateTexture(texture, framebuffer)
-				sync.mutex_lock(mutex)
 				draw^ = false
-				sync.mutex_unlock(mutex)
+				sync.cond_signal(td.cond)
 			}
+			sync.mutex_unlock(td.mutex)
 
 			rl.BeginDrawing()
 
@@ -402,11 +409,18 @@ main :: proc() {
 				0,
 				rl.WHITE,
 			)
-
 			rl.ClearBackground(rl.BLACK)
+
 			rl.EndDrawing()
+
 		}
 
+		// Ensure main thread is not left waiting on shutdown
+		sync.mutex_lock(td.mutex)
+		renderer_running = false
+		draw^ = false
+		sync.cond_signal(td.cond)
+		sync.mutex_unlock(td.mutex)
 		fmt.println("closing Raylib")
 	}
 
@@ -427,7 +441,6 @@ main :: proc() {
 			if rl.IsKeyDown(.ENTER) {cpu.joypad -= {.Select_Up}}
 			if rl.IsKeyDown(.SPACE) {cpu.joypad -= {.Start_Down}}
 		}
-
 
 		if (transmute(u8)cpu.joypad != 0x00) {
 			cpu.interrupt.flags += {.Joypad}

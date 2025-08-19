@@ -1,8 +1,5 @@
 package main
 
-import "base:intrinsics"
-import "core:log"
-
 Cartridge_Features :: enum {
 	Rom,
 	MBC1,

@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:log"
 import "core:math/rand"
 
 Address :: distinct u16
@@ -486,7 +485,6 @@ read_u8 :: proc(address: Address) -> u8 {
 	case address == 0xFF44:
 		return gpu.scanline
 	case address == 0xFF00:
-	
 		return transmute(u8)cpu.joypad
 
 	case address == 0xFF0F:
@@ -504,7 +502,7 @@ read_u8 :: proc(address: Address) -> u8 {
 	case is_address_in_mm(address, MM.IO):
 		return memory.io[address - MM_Start[MM.IO]]
 	case:
-		log.fatalf("Reading Adress: 0x%04X is invalid;", address)
+		fmt.printfln("Reading Adress: 0x%04X is invalid;", address)
 		return 0
 	}
 }
@@ -582,7 +580,7 @@ write_u8 :: proc(address: Address, value: u8, location := #caller_location) {
 	case is_address_in_mm(address, MM.IO):
 		memory.io[address - MM_Start[MM.IO]] = value
 	case:
-		log.infof("Writing %v Adress: 0x%04X is invalid", value, address)
+		fmt.printfln("Writing %v Adress: 0x%04X is invalid", value, address)
 	}
 
 }

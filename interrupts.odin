@@ -1,8 +1,7 @@
 package main
 
-import "core:fmt"
-import "core:log"
-import rl "vendor:raylib"
+import "core:sync"
+
 
 interrupt_step :: proc() {
 	if !cpu.interrupt.master do return
@@ -11,8 +10,16 @@ interrupt_step :: proc() {
 	if .VBlank in fire {
 		cpu.interrupt.flags -= {.VBlank}
 
-		gpu.draw = true
-		for gpu.draw {}
+		sync.mutex_lock(&mutex)
+		if renderer_running {
+			gpu.draw = true
+			for renderer_running && gpu.draw {
+				sync.cond_wait(&cond, &mutex)
+			}
+		} else {
+			gpu.draw = false
+		}
+		sync.mutex_unlock(&mutex)
 
 		cpu.interrupt.master = false
 		push_sp(u16(cpu.PC))

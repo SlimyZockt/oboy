@@ -1,6 +1,6 @@
 package main
 
-import "core:fmt"
+// import "core:fmt"
 
 Color :: distinct [3]u8
 Palette :: distinct [4]Color
@@ -34,7 +34,7 @@ Vec2 :: distinct [2]u8
 
 TileData :: distinct [16]u8
 Color_Index :: u8
-Tile :: distinct [64]Color_Index
+Tile :: [64]Color_Index
 Object :: struct {
 	y:          u8,
 	x:          u8,
@@ -216,35 +216,37 @@ draw_scanline :: proc(line: u8) {
 		if .OBJ_Size in gpu.controll {
 			// 8x16 sprites
 			y_in_sprite: u8 = u8(i16(line) - sp_y)
-			if .Y_Filp in object.flags { y_in_sprite = 15 - y_in_sprite }
+			if .Y_Filp in object.flags do y_in_sprite = 15 - y_in_sprite
 			tile_number := (object.tile_index & 0xFE) + u8(y_in_sprite >> 3)
 			row_in_tile := y_in_sprite & 7
 			tile := tiles[tile_number]
-			for x in 0 ..< 8 {
-				sx := sp_x + i16(x)
-				can_draw := (sx >= 0)
-				can_draw &&= (sx < SCREEN_WIDTH)
-				can_draw &&= (.Priority not_in object.flags || scanline_row[u8(sx)] == 0)
-				if !can_draw do continue
-				col := u8(7 - x) if .X_Filp in object.flags else u8(x)
-				tile_pos := (row_in_tile * 8) + col
-				color := tile[tile_pos]
-				if color == 0 do continue
-				dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
-				framebuffer[dst] = palette[color]
-			}
+			draw_obj(object, row_in_tile, sp_x, line, palette, &scanline_row, &tile)
 			continue
 		}
 		tile := tiles[object.tile_index]
 		y: u8 = u8(i16(line) - sp_y)
-		if .Y_Filp in object.flags { y = 7 - y }
+		if .Y_Filp in object.flags {y = 7 - y}
+		draw_obj(object, y, sp_x, line, palette, &scanline_row, &tile)
+
+	}
+
+	draw_obj :: proc(
+		object: ^Object,
+		y: u8,
+		sp_x: i16,
+		line: u8,
+		palette: Palette,
+		scanline_row: ^[160]u8,
+		tile: ^[64]Color_Index,
+	) {
 		for x in 0 ..< 8 {
 			sx := sp_x + i16(x)
 			can_draw := (sx >= 0)
 			can_draw &&= (sx < SCREEN_WIDTH)
 			can_draw &&= (.Priority not_in object.flags || scanline_row[u8(sx)] == 0)
 			if !can_draw do continue
-			color := tile[(y * 8) + (7 - u8(x))] if .X_Filp in object.flags else tile[(y * 8) + u8(x)]
+			color :=
+				tile[(y * 8) + (7 - u8(x))] if .X_Filp in object.flags else tile[(y * 8) + u8(x)]
 			if color == 0 do continue
 			dst := (u32(line) * SCREEN_WIDTH) + u32(sx)
 			framebuffer[dst] = palette[color]
