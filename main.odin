@@ -303,32 +303,10 @@ main :: proc() {
 	gb_arena: vmem.Arena
 	err := vmem.arena_init_growing(&gb_arena)
 	ensure(err == nil)
-	gb_alloc := vmem.arena_allocator(&gb_arena)
-	context.allocator = gb_alloc
+	context.allocator = vmem.arena_allocator(&gb_arena)
+	defer vmem.arena_destroy(&gb_arena)
 
-	debug_data.instruction_data = make([dynamic]Instruction_Debug_Data, gb_alloc)
-
-	when ODIN_DEBUG {
-		track: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
-
-		defer {
-			if len(track.allocation_map) > 0 {
-				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-				for _, entry in track.allocation_map {
-					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-				}
-			}
-			if len(track.bad_free_array) > 0 {
-				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-				for entry in track.bad_free_array {
-					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
-				}
-			}
-			mem.tracking_allocator_destroy(&track)
-		}
-	}
+	debug_data.instruction_data = make([dynamic]Instruction_Debug_Data)
 
 
 	{ 	// Setup emulator
@@ -340,6 +318,7 @@ main :: proc() {
 
 		rom_path := os.args[1]
 		rom, ok := os.read_entire_file_from_filename(rom_path)
+		defer delete(rom)
 		if !ok {
 			log.error("Can not read file:", ok)
 			return
@@ -347,6 +326,7 @@ main :: proc() {
 
 		memory.mapper = new_mapper(rom)
 	}
+	defer delete(memory.mapper.rom)
 	defer free(memory.mapper)
 
 	load_boot_rom(&cpu)
@@ -357,6 +337,7 @@ main :: proc() {
 		mutex: ^sync.Mutex,
 		cond:  ^sync.Cond,
 	}
+
 
 	thread_data := ThreadUtil{&mutex, &cond}
 
